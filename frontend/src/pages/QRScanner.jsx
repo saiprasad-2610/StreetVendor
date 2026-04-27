@@ -11,6 +11,11 @@ const QRScanner = () => {
   const [error, setError] = useState(null);
   const [location, setLocation] = useState(null);
   const [accuracy, setAccuracy] = useState(null);
+  const [locationHistory, setLocationHistory] = useState([]);
+  const [gpsStatus, setGpsStatus] = useState('initializing');
+  const [showManualLocation, setShowManualLocation] = useState(false);
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
   const [reporting, setReporting] = useState(false);
   const [description, setDescription] = useState('');
   const [reportSuccess, setReportSuccess] = useState(false);
@@ -22,6 +27,179 @@ const QRScanner = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [scannerInstance, setScannerInstance] = useState(null);
+
+  // Get location with progressive fallback strategy
+  const getLocationWithFallback = async () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation not supported');
+    }
+
+    setGpsStatus('initializing');
+
+    // Strategy 1: Try high accuracy GPS with averaging
+    let loc = await tryHighAccuracyLocation();
+    if (loc) {
+      setGpsStatus('good');
+      return loc;
+    }
+
+    // Strategy 2: Try medium accuracy
+    setGpsStatus('poor');
+    loc = await tryMediumAccuracyLocation();
+    if (loc) {
+      return loc;
+    }
+
+    // Strategy 3: Try low accuracy (network-based)
+    loc = await tryLowAccuracyLocation();
+    if (loc) {
+      return loc;
+    }
+
+    setGpsStatus('failed');
+    throw new Error('Unable to get location after all fallback strategies');
+  };
+
+  const tryHighAccuracyLocation = async () => {
+    const readings = [];
+    const maxReadings = 5;
+    const minAccuracy = 20;
+
+    for (let i = 0; i < maxReadings; i++) {
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(
+            resolve,
+            reject,
+            {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 0
+            }
+          );
+        });
+
+        if (position.coords.accuracy && position.coords.accuracy <= minAccuracy) {
+          readings.push({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          });
+        }
+      } catch (err) {
+        console.error('High accuracy location error:', err);
+      }
+
+      if (i < maxReadings - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    if (readings.length === 0) return null;
+
+    const weights = readings.map(r => 1 / (r.accuracy * r.accuracy));
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
+    const avgLat = readings.reduce((sum, r, i) => sum + r.lat * weights[i], 0) / totalWeight;
+    const avgLng = readings.reduce((sum, r, i) => sum + r.lng * weights[i], 0) / totalWeight;
+    const avgAccuracy = readings.reduce((sum, r) => sum + r.accuracy, 0) / readings.length;
+
+    return {
+      lat: avgLat,
+      lng: avgLng,
+      accuracy: avgAccuracy
+    };
+  };
+
+  const tryMediumAccuracyLocation = async () => {
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          reject,
+          {
+            enableHighAccuracy: false,
+            timeout: 15000,
+            maximumAge: 0
+          }
+        );
+      });
+      return {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy || 50
+      };
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const tryLowAccuracyLocation = async () => {
+    try {
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          reject,
+          {
+            enableHighAccuracy: false,
+            timeout: 20000,
+            maximumAge: 60000 // Allow 1 minute old location
+          }
+        );
+      });
+      return {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy || 100
+      };
+    } catch (err) {
+      return null;
+    }
+  };
+
+  // Collect Wi-Fi access points for Google Geolocation API
+  const collectWifiAccessPoints = async () => {
+    // Browser security prevents direct Wi-Fi scanning
+    // This would require a native app or extension
+    // For web, we rely on browser's built-in geolocation
+    return null;
+  };
+
+  // Use watchPosition for continuous location updates (like Google Maps)
+  const startContinuousLocationTracking = () => {
+    if (!navigator.geolocation) return null;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const loc = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy || 50
+        };
+        setLocation(loc);
+        setAccuracy(loc.accuracy);
+
+        // Update status based on accuracy
+        if (loc.accuracy < 10) {
+          setGpsStatus('good');
+        } else if (loc.accuracy < 50) {
+          setGpsStatus('poor');
+        }
+      },
+      (error) => {
+        console.error('Location watch error:', error);
+        setGpsStatus('failed');
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+        distanceFilter: 5 // Update only if moved 5 meters
+      }
+    );
+
+    return watchId;
+  };
 
   useEffect(() => {
     let scanner = null;
@@ -81,23 +259,17 @@ const QRScanner = () => {
       }
     }
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          setAccuracy(pos.coords.accuracy);
-        },
-        (err) => {
-          console.error("GPS Error:", err);
-          setError("Location access denied. Please enable GPS and allow browser access.");
-        },
-        { 
-          enableHighAccuracy: true, 
-          timeout: 10000, 
-          maximumAge: 0 
-        }
-      );
-    }
+    // Initialize with high-accuracy location
+    getLocationWithFallback()
+      .then(loc => {
+        setLocation({ lat: loc.lat, lng: loc.lng });
+        setAccuracy(loc.accuracy);
+        setLocationHistory([loc]);
+      })
+      .catch(err => {
+        console.error("GPS Error:", err);
+        setError("Location access denied. Please enable GPS and allow browser access.");
+      });
 
     return () => {
       clearTimeout(timer);
@@ -288,19 +460,26 @@ const QRScanner = () => {
       return;
     }
 
+    // CRITICAL: Refresh location before validation for real-time accuracy
     setLoading(true);
     setError(null);
     setShowCamera(false);
+
     try {
+      const freshLocation = await getLocationWithFallback();
+      setLocation({ lat: freshLocation.lat, lng: freshLocation.lng });
+      setAccuracy(freshLocation.accuracy);
+      setLocationHistory(prev => [...prev, freshLocation]);
+
       // Create FormData for real image upload
       const formData = new FormData();
       formData.append('vendorId', vendorId);
-      formData.append('latitude', location.lat);
-      formData.append('longitude', location.lng);
-      formData.append('gpsAccuracy', accuracy);
+      formData.append('latitude', freshLocation.lat);
+      formData.append('longitude', freshLocation.lng);
+      formData.append('gpsAccuracy', freshLocation.accuracy);
       formData.append('deviceId', navigator.userAgent || "unknown_device");
       formData.append('weatherCondition', "clear");
-      
+
       // Convert base64 to blob and upload real photo
       const response = await fetch(photoData);
       const blob = await response.blob();
@@ -369,6 +548,26 @@ const QRScanner = () => {
     // Mock Solapur location
     const mockLoc = { lat: 17.6599, lng: 75.9064 };
     setLocation(mockLoc);
+    setError(null);
+  };
+
+  const handleManualLocationSubmit = () => {
+    const lat = parseFloat(manualLat);
+    const lng = parseFloat(manualLng);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      setError('Please enter valid latitude and longitude');
+      return;
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      setError('Latitude must be between -90 and 90, Longitude between -180 and 180');
+      return;
+    }
+
+    setLocation({ lat, lng });
+    setAccuracy(0);
+    setShowManualLocation(false);
     setError(null);
   };
 
@@ -449,9 +648,24 @@ const QRScanner = () => {
                 <MapPin size={16} className="text-smc-blue" />
                 {location ? `GPS: ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}` : "Detecting GPS..."}
               </div>
-              {accuracy !== null && (
-                <div className={`text-[10px] font-bold uppercase ${accuracy < 10 ? 'text-green-500' : 'text-orange-500'}`}>
-                  Precision: ±{accuracy.toFixed(1)} meters {accuracy < 10 ? '(High Accuracy)' : '(Low Accuracy)'}
+              {gpsStatus === 'initializing' && (
+                <div className="text-[10px] font-bold uppercase text-blue-500">
+                  🔄 Getting GPS...
+                </div>
+              )}
+              {gpsStatus === 'good' && accuracy !== null && (
+                <div className="text-[10px] font-bold uppercase text-green-500">
+                  ✓ GPS: ±{accuracy.toFixed(1)}m (High Accuracy)
+                </div>
+              )}
+              {gpsStatus === 'poor' && accuracy !== null && (
+                <div className="text-[10px] font-bold uppercase text-yellow-500">
+                  ⚠ GPS: ±{accuracy.toFixed(1)}m (Low Accuracy)
+                </div>
+              )}
+              {gpsStatus === 'failed' && (
+                <div className="text-[10px] font-bold uppercase text-red-500">
+                  ✗ GPS Failed - Please enable location
                 </div>
               )}
             </div>
@@ -532,9 +746,65 @@ const QRScanner = () => {
             <p className="text-gray-300 text-sm">
               Scan successful! We are still trying to detect your location to verify if the vendor is in the right spot.
             </p>
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
               <button onClick={useMockLocation} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg">
                 USE MOCK LOCATION FOR TESTING
+              </button>
+              <button onClick={() => setShowManualLocation(true)} className="w-full bg-gray-600 text-white py-3 rounded-xl font-bold hover:bg-gray-700 transition shadow-lg">
+                ENTER LOCATION MANUALLY
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showManualLocation && (
+          <div className="bg-white rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900">Enter Location Manually</h2>
+              <button onClick={() => setShowManualLocation(false)}>
+                <X size={24} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <button
+                onClick={() => window.open('https://www.google.com/maps', '_blank')}
+                className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg flex items-center justify-center gap-2"
+              >
+                <MapPin size={20} /> Open Google Maps to Get Location
+              </button>
+
+              <div className="text-center text-gray-400 text-sm font-semibold py-2">OR ENTER MANUALLY</div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Latitude *</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="e.g., 17.6599"
+                  value={manualLat}
+                  onChange={(e) => setManualLat(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Longitude *</label>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="e.g., 75.9064"
+                  value={manualLng}
+                  onChange={(e) => setManualLng(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <p className="text-sm text-gray-500 italic">
+                Tip: In Google Maps, tap and hold on your location to see coordinates.
+              </p>
+              <button
+                onClick={handleManualLocationSubmit}
+                className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition shadow-lg flex items-center justify-center gap-2"
+              >
+                <Send size={20} /> Set Location
               </button>
             </div>
           </div>

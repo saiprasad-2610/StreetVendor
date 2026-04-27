@@ -12,6 +12,7 @@ const ScanQRScreen = ({ navigation, route }: any) => {
   const [loading, setLoading] = useState(false);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [locationHistory, setLocationHistory] = useState<{ latitude: number; longitude: number; accuracy: number }[]>([]);
   const [vendorInfo, setVendorInfo] = useState<any>(null);
   const [showReportModal, setShowReportModal] = useState(false);
   const [violationDesc, setViolationDesc] = useState('');
@@ -19,23 +20,181 @@ const ScanQRScreen = ({ navigation, route }: any) => {
   const [reporterPhone, setReporterPhone] = useState('');
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [takingPhoto, setTakingPhoto] = useState(false);
+  const [gpsStatus, setGpsStatus] = useState<'initializing' | 'good' | 'poor' | 'failed'>('initializing');
+  const [showManualLocation, setShowManualLocation] = useState(false);
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
   const cameraRef = React.useRef<any>(null);
+
+  // Get location with progressive fallback strategy
+  const getLocationWithFallback = async (): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission denied', 'Location access is required for scanning.');
+      setGpsStatus('failed');
+      return null;
+    }
+
+    setGpsStatus('initializing');
+
+    // Strategy 1: Try high accuracy GPS with averaging
+    let loc = await tryHighAccuracyLocation();
+    if (loc) {
+      setGpsStatus('good');
+      return loc;
+    }
+
+    // Strategy 2: Try medium accuracy
+    setGpsStatus('poor');
+    loc = await tryMediumAccuracyLocation();
+    if (loc) {
+      return loc;
+    }
+
+    // Strategy 3: Try low accuracy (network-based)
+    loc = await tryLowAccuracyLocation();
+    if (loc) {
+      return loc;
+    }
+
+    // Strategy 4: Use last known location
+    loc = await tryLastKnownLocation();
+    if (loc) {
+      Alert.alert('Using Last Known Location', 'GPS signal is weak. Using your last known location.');
+      return loc;
+    }
+
+    setGpsStatus('failed');
+    return null;
+  };
+
+  const tryHighAccuracyLocation = async (): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    const readings: { latitude: number; longitude: number; accuracy: number }[] = [];
+    const maxReadings = 5;
+    const minAccuracy = 20;
+
+    for (let i = 0; i < maxReadings; i++) {
+      try {
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Highest,
+        });
+
+        if (loc.coords.accuracy && loc.coords.accuracy <= minAccuracy) {
+          readings.push({
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+            accuracy: loc.coords.accuracy,
+          });
+        }
+      } catch (err) {
+        console.error('High accuracy location error:', err);
+      }
+
+      if (i < maxReadings - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    if (readings.length === 0) return null;
+
+    const weights = readings.map(r => 1 / (r.accuracy * r.accuracy));
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
+    const avgLat = readings.reduce((sum, r, i) => sum + r.latitude * weights[i], 0) / totalWeight;
+    const avgLng = readings.reduce((sum, r, i) => sum + r.longitude * weights[i], 0) / totalWeight;
+    const avgAccuracy = readings.reduce((sum, r) => sum + r.accuracy, 0) / readings.length;
+
+    return { latitude: avgLat, longitude: avgLng, accuracy: avgAccuracy };
+  };
+
+  const tryMediumAccuracyLocation = async (): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      return {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        accuracy: loc.coords.accuracy || 50,
+      };
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const tryLowAccuracyLocation = async (): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Low,
+      });
+      return {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        accuracy: loc.coords.accuracy || 100,
+      };
+    } catch (err) {
+      return null;
+    }
+  };
+
+  const tryLastKnownLocation = async (): Promise<{ latitude: number; longitude: number; accuracy: number } | null> => {
+    try {
+      const loc = await Location.getLastKnownPositionAsync();
+      if (loc) {
+        return {
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          accuracy: loc.coords.accuracy || 100,
+        };
+      }
+    } catch (err) {
+      console.error('Last known location error:', err);
+    }
+    return null;
+  };
+
+  // Start continuous location tracking (like Google Maps)
+  const startContinuousLocationTracking = () => {
+    const subscription = Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Highest,
+        timeInterval: 1000, // Update every second
+        distanceInterval: 5, // Update only if moved 5 meters
+      },
+      (newLocation) => {
+        const loc = {
+          latitude: newLocation.coords.latitude,
+          longitude: newLocation.coords.longitude,
+          accuracy: newLocation.coords.accuracy || 50,
+        };
+        setLocation(loc);
+        setAccuracy(loc.accuracy);
+        setLocationHistory(prev => [...prev, loc]);
+
+        // Update status based on accuracy
+        if (loc.accuracy < 10) {
+          setGpsStatus('good');
+        } else if (loc.accuracy < 50) {
+          setGpsStatus('poor');
+        }
+      }
+    );
+
+    return subscription;
+  };
+
+  // Open Google Maps to get current location
+  const openGoogleMapsForLocation = () => {
+    Linking.openURL('https://www.google.com/maps');
+  };
 
   useEffect(() => {
     (async () => {
-      const { status: locationStatus } = await Location.requestForegroundPermissionsAsync();
-
-      if (locationStatus === 'granted') {
-        const currentLoc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Highest,
-        });
-        setLocation({
-          latitude: currentLoc.coords.latitude,
-          longitude: currentLoc.coords.longitude,
-        });
-        setAccuracy(currentLoc.coords.accuracy);
-      } else {
-        Alert.alert('Permission denied', 'Location access is required for scanning.');
+      const loc = await getLocationWithFallback();
+      if (loc) {
+        setLocation({ latitude: loc.latitude, longitude: loc.longitude });
+        setAccuracy(loc.accuracy);
+        setLocationHistory([loc]);
       }
     })();
   }, []);
@@ -44,43 +203,45 @@ const ScanQRScreen = ({ navigation, route }: any) => {
     if (!scanning) return;
     setScanning(false);
     setLoading(true);
-    
+
     let vendorId = data;
     try {
       const parsedData = JSON.parse(data);
       vendorId = parsedData.id || data;
     } catch (err) {}
 
-    // Ensure location is available before scanning
-    if (!location) {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const currentLoc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Highest,
-        });
-        const loc = {
-          latitude: currentLoc.coords.latitude,
-          longitude: currentLoc.coords.longitude,
-        };
-        setLocation(loc);
-        setAccuracy(currentLoc.coords.accuracy);
-        await performScan(vendorId, loc);
-      } else {
-        Alert.alert('Location Required', 'Please enable location to scan vendors.');
-        setScanning(true);
-        setLoading(false);
-      }
-    } else {
-      await performScan(vendorId, location);
+    // CRITICAL: Refresh location before each scan for real-time accuracy
+    const freshLocation = await getLocationWithFallback();
+    if (!freshLocation) {
+      Alert.alert(
+        'Location Required',
+        'Unable to get your location. Please enable GPS or enter location manually.',
+        [
+          { text: 'Cancel', onPress: () => { setScanning(true); setLoading(false); } },
+          { text: 'Enter Manually', onPress: () => { setShowManualLocation(true); setLoading(false); } }
+        ]
+      );
+      return;
     }
+
+    const loc = {
+      latitude: freshLocation.latitude,
+      longitude: freshLocation.longitude,
+    };
+    setLocation(loc);
+    setAccuracy(freshLocation.accuracy);
+    setLocationHistory(prev => [...prev, freshLocation]);
+
+    await performScan(vendorId, loc, freshLocation.accuracy);
   };
 
-  const performScan = async (vendorId: string, loc: { latitude: number, longitude: number }) => {
+  const performScan = async (vendorId: string, loc: { latitude: number, longitude: number }, gpsAccuracy: number) => {
     try {
       const response = await api.post('/scan/validate', {
         vendorId,
         latitude: loc.latitude,
         longitude: loc.longitude,
+        gpsAccuracy: gpsAccuracy,
       });
       setVendorInfo(response.data);
     } catch (error: any) {
@@ -117,7 +278,7 @@ const ScanQRScreen = ({ navigation, route }: any) => {
       formData.append('description', violationDesc);
       formData.append('gpsLatitude', (location?.latitude || 0).toString());
       formData.append('gpsLongitude', (location?.longitude || 0).toString());
-      
+
       if (isPublic) {
         formData.append('reporterName', reporterName);
         formData.append('reporterPhone', reporterPhone);
@@ -126,7 +287,7 @@ const ScanQRScreen = ({ navigation, route }: any) => {
       if (capturedImage) {
         const uriParts = capturedImage.split('.');
         const fileType = uriParts[uriParts.length - 1];
-        
+
         formData.append('image', {
           uri: capturedImage,
           name: `violation_${Date.now()}.${fileType}`,
@@ -149,6 +310,27 @@ const ScanQRScreen = ({ navigation, route }: any) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleManualLocationSubmit = () => {
+    const lat = parseFloat(manualLat);
+    const lng = parseFloat(manualLng);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      Alert.alert('Invalid Input', 'Please enter valid latitude and longitude');
+      return;
+    }
+
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      Alert.alert('Invalid Coordinates', 'Latitude must be between -90 and 90, Longitude between -180 and 180');
+      return;
+    }
+
+    setLocation({ latitude: lat, longitude: lng });
+    setAccuracy(0); // Manual entry has no accuracy
+    setShowManualLocation(false);
+
+    Alert.alert('Location Set', 'Manual location set successfully. You can now scan the vendor.');
   };
 
   if (!permission) {
@@ -207,10 +389,29 @@ const ScanQRScreen = ({ navigation, route }: any) => {
           />
           <View style={styles.overlay}>
             <Text style={styles.centerText}>Scan Vendor QR Code</Text>
-            {accuracy !== null && (
+            {gpsStatus === 'initializing' && (
               <View style={styles.accuracyBadge}>
+                <Text style={styles.accuracyText}>🔄 Getting GPS...</Text>
+              </View>
+            )}
+            {gpsStatus === 'good' && accuracy !== null && (
+              <View style={[styles.accuracyBadge, { backgroundColor: 'rgba(34, 197, 94, 0.8)' }]}>
                 <Text style={styles.accuracyText}>
-                  GPS Accuracy: ±{accuracy.toFixed(1)}m
+                  ✓ GPS: ±{accuracy.toFixed(1)}m (High Accuracy)
+                </Text>
+              </View>
+            )}
+            {gpsStatus === 'poor' && accuracy !== null && (
+              <View style={[styles.accuracyBadge, { backgroundColor: 'rgba(234, 179, 8, 0.8)' }]}>
+                <Text style={styles.accuracyText}>
+                  ⚠ GPS: ±{accuracy.toFixed(1)}m (Low Accuracy)
+                </Text>
+              </View>
+            )}
+            {gpsStatus === 'failed' && (
+              <View style={[styles.accuracyBadge, { backgroundColor: 'rgba(239, 68, 68, 0.8)' }]}>
+                <Text style={styles.accuracyText}>
+                  ✗ GPS Failed - Tap to retry
                 </Text>
               </View>
             )}
@@ -335,6 +536,53 @@ const ScanQRScreen = ({ navigation, route }: any) => {
             <TouchableOpacity style={styles.submitButton} onPress={submitViolation}>
               <Send color="#fff" size={20} />
               <Text style={styles.submitButtonText}>Submit Report</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal visible={showManualLocation} animationType="slide">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Enter Location Manually</Text>
+            <TouchableOpacity onPress={() => setShowManualLocation(false)}>
+              <X color="#111827" size={24} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            <TouchableOpacity style={styles.googleMapsButton} onPress={openGoogleMapsForLocation}>
+              <MapPin color="#4285F4" size={20} />
+              <Text style={styles.googleMapsButtonText}>Open Google Maps to Get Location</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.dividerText}>OR ENTER MANUALLY</Text>
+
+            <Text style={styles.inputLabel}>Latitude *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., 17.6599"
+              value={manualLat}
+              onChangeText={setManualLat}
+              keyboardType="decimal-pad"
+            />
+
+            <Text style={styles.inputLabel}>Longitude *</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., 75.9064"
+              value={manualLng}
+              onChangeText={setManualLng}
+              keyboardType="decimal-pad"
+            />
+
+            <Text style={styles.infoText}>
+              Tip: In Google Maps, tap and hold on your location to see coordinates.
+            </Text>
+
+            <TouchableOpacity style={styles.submitButton} onPress={handleManualLocationSubmit}>
+              <Send color="#fff" size={20} />
+              <Text style={styles.submitButtonText}>Set Location</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -496,6 +744,34 @@ const styles = StyleSheet.create({
     color: '#1e293b',
     backgroundColor: '#f8fafc',
     marginBottom: 16,
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  googleMapsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4285F4',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    gap: 10,
+  },
+  googleMapsButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  dividerText: {
+    textAlign: 'center',
+    color: '#9ca3af',
+    fontSize: 12,
+    marginBottom: 20,
+    fontWeight: '600',
   },
   textArea: {
     borderWidth: 1,

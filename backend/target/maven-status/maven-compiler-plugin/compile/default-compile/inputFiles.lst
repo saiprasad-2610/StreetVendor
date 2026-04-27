@@ -1,3 +1,4 @@
+D:\StreetVendor\backend\src\main\java\com\smc\svms\util\IPGeolocationUtil.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\User.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\controller\AuthController.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\repository\VendorLocationRepository.java
@@ -32,6 +33,7 @@ D:\StreetVendor\backend\src\main\java\com\smc\svms\config\EnhancedSecurityConfig
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\ZoneRequest.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\ZoneCategory.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\FileStorageService.java
+D:\StreetVendor\backend\src\main\java\com\smc\svms\service\LocationService.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\ViolationStats.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\ValidationLayer.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\ReportType.java
@@ -68,6 +70,7 @@ D:\StreetVendor\backend\src\main\java\com\smc\svms\SvmsApplication.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\LoginRequest.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\enums\UserRole.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\repository\UserRepository.java
+D:\StreetVendor\backend\src\main\java\com\smc\svms\util\ReverseGeocodingUtil.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\ChallanService.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\AlertStatistics.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\ApiResponse.java

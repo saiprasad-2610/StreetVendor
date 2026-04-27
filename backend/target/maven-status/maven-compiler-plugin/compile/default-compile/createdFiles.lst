@@ -79,6 +79,7 @@ com\smc\svms\service\ChallanService.class
 com\smc\svms\dto\AlertStatistics.class
 com\smc\svms\util\QrCodeGenerator.class
 com\smc\svms\service\DynamicPricingService$PricingBreakdown$Builder.class
+com\smc\svms\service\LocationService.class
 com\smc\svms\repository\ViolationPatternRepository.class
 com\smc\svms\service\VendorStats.class
 com\smc\svms\enums\AlertStatus.class
@@ -100,6 +101,7 @@ com\smc\svms\dto\ZoneRequest.class
 com\smc\svms\service\SMSService.class
 com\smc\svms\service\AlertService.class
 com\smc\svms\service\DashboardStatistics$Builder.class
+com\smc\svms\util\IPGeolocationUtil$LocationResult.class
 com\smc\svms\controller\ZoneController.class
 com\smc\svms\entity\RentPayment$RentPaymentBuilder.class
 com\smc\svms\service\DynamicPricingService$DailyPricing$Builder.class
@@ -207,6 +209,7 @@ com\smc\svms\controller\EnhancedZoneController.class
 com\smc\svms\security\JwtUtils.class
 com\smc\svms\entity\VendorLocation$VendorLocationBuilder.class
 com\smc\svms\repository\VendorLocationRepository.class
+com\smc\svms\util\ReverseGeocodingUtil.class
 com\smc\svms\controller\VendorController.class
 com\smc\svms\service\Coordinate.class
 com\smc\svms\entity\ZoneType.class
@@ -218,6 +221,7 @@ com\smc\svms\dto\ZoneInfo$ZoneInfoBuilder.class
 com\smc\svms\entity\Violation.class
 com\smc\svms\enums\UserRole.class
 com\smc\svms\entity\CitizenReport$CitizenReportBuilder.class
+com\smc\svms\util\IPGeolocationUtil.class
 com\smc\svms\service\DynamicPricingService$MonthlyBill.class
 com\smc\svms\service\DuplicateCheckResult.class
 com\smc\svms\service\DynamicPricingService$DailyPricing.class
