@@ -11,6 +11,11 @@ public class LocationValidationResult {
     private ZoneType zoneType;
     private ZoneCategory zoneCategory;
     
+    // Advanced geofencing fields
+    private Double confidence;
+    private String algorithmUsed;
+    private Double gpsAccuracy;
+    
     public LocationValidationResult() {}
     
     public LocationValidationResult(boolean valid, String message, double distance, String zoneName, ZoneType zoneType, ZoneCategory zoneCategory) {
@@ -40,4 +45,14 @@ public class LocationValidationResult {
     
     public ZoneCategory getZoneCategory() { return zoneCategory; }
     public void setZoneCategory(ZoneCategory zoneCategory) { this.zoneCategory = zoneCategory; }
+    
+    // Advanced geofencing getters and setters
+    public Double getConfidence() { return confidence; }
+    public void setConfidence(Double confidence) { this.confidence = confidence; }
+    
+    public String getAlgorithmUsed() { return algorithmUsed; }
+    public void setAlgorithmUsed(String algorithmUsed) { this.algorithmUsed = algorithmUsed; }
+    
+    public Double getGpsAccuracy() { return gpsAccuracy; }
+    public void setGpsAccuracy(Double gpsAccuracy) { this.gpsAccuracy = gpsAccuracy; }
 }

@@ -126,7 +126,7 @@ spring:
     name: api-gateway
   cloud:
     consul:
-      host: localhost
+      host: 10.62.25.31
       port: 8500
       discovery:
         service-name: ${spring.application.name}
@@ -220,7 +220,7 @@ eureka:
     register-with-eureka: false
     fetch-registry: false
     service-url:
-      defaultZone: http://localhost:8761/eureka/
+      defaultZone: http://10.62.25.31:8761/eureka/
   server:
     enable-self-preservation: false
     eviction-interval-timer-in-ms: 5000
@@ -640,7 +640,7 @@ public class TracingConfig {
     
     @Bean
     public Sender sender() {
-        return OkHttpSender.create("http://localhost:9411/api/v2/spans");
+        return OkHttpSender.create("http://10.62.25.31:9411/api/v2/spans");
     }
     
     @Bean
@@ -773,7 +773,7 @@ EXPOSE 8081
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8081/actuator/health || exit 1
+    CMD curl -f http://10.62.25.31:8081/actuator/health || exit 1
 
 # JVM options
 ENV JAVA_OPTS="-Xmx512m -Xms256m -XX:+UseG1GC -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
@@ -795,7 +795,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=docker
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://10.62.25.31:8761/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -811,7 +811,7 @@ services:
       - SPRING_PROFILES_ACTIVE=docker
       - EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE=http://service-registry:8761/eureka
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://10.62.25.31:8080/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -831,7 +831,7 @@ services:
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/svms_vendor
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      test: ["CMD", "curl", "-f", "http://10.62.25.31:8081/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -877,7 +877,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "10.62.25.31"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -911,10 +911,10 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://10.62.25.31:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "10.62.25.31:9092"]
       interval: 30s
       timeout: 10s
       retries: 3

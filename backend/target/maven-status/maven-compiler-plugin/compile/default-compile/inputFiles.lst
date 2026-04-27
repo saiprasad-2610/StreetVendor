@@ -60,6 +60,7 @@ D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\ZonePricing.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\config\CustomAccessDeniedHandler.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\RealTimeStats.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\VendorSelfRegisterRequest.java
+D:\StreetVendor\backend\src\main\java\com\smc\svms\algorithm\AdvancedGeofencingAlgorithms.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\controller\AlertController.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\VendorCategory.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\VendorStatus.java

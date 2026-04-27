@@ -2,13 +2,17 @@ package com.smc.svms.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smc.svms.algorithm.AdvancedGeofencingAlgorithms;
+import com.smc.svms.algorithm.AdvancedGeofencingAlgorithms.*;
 import com.smc.svms.entity.*;
 import com.smc.svms.enums.ZoneType;
 import com.smc.svms.repository.*;
 import com.smc.svms.dto.ZoneCapacityInfo;
 import com.smc.svms.dto.LocationValidationResult;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
@@ -28,11 +32,34 @@ public class EnhancedGeofencingService {
     private final ObjectMapper objectMapper;
 
     private static final double EARTH_RADIUS = 6371000; // meters
+    
+    // R-tree index for complex polygon zones
+    private RTreeIndexing.PolygonRTree polygonRTree;
+    
+    // Cache for zone characteristics
+    private final Map<Long, ZoneCharacteristics> zoneCharacteristicsCache = new HashMap<>();
+    
+    // Adaptive algorithm selector
+    private final AdaptiveAlgorithmSelector algorithmSelector = new AdaptiveAlgorithmSelector();
+    
+    @Value("${geofencing.use-advanced-algorithms:true}")
+    private boolean useAdvancedAlgorithms;
+    
+    @Value("${geofencing.default-gps-accuracy:10.0}")
+    private double defaultGpsAccuracy;
 
     /**
-     * Check if vendor is within their assigned zone
+     * Check if vendor is within their assigned zone (legacy method for backward compatibility)
      */
     public LocationValidationResult validateVendorLocation(Long vendorId, double latitude, double longitude) {
+        return validateVendorLocationWithAccuracy(vendorId, latitude, longitude, defaultGpsAccuracy);
+    }
+    
+    /**
+     * Check if vendor is within their assigned zone with GPS accuracy awareness
+     * Uses advanced algorithms for improved accuracy and performance
+     */
+    public LocationValidationResult validateVendorLocationWithAccuracy(Long vendorId, double latitude, double longitude, double gpsAccuracy) {
         
         try {
             // Get vendor's assigned location
@@ -77,26 +104,37 @@ public class EnhancedGeofencingService {
                 return result;
             }
             
-            // Validate location
+            // Validate location using advanced algorithms if enabled
             boolean isWithinZone = false;
             double distance = 0;
+            double confidence = 1.0;
+            String algorithmUsed = "HAVERSINE";
             
-            if (zone.hasPolygon()) {
-                // Use polygon validation
-                isWithinZone = isPointInPolygon(latitude, longitude, zone.getPolygonCoordinatesJson());
-            } else if (zone.getRadiusMeters() != null) {
-                // Use existing radius validation (backward compatibility)
-                distance = calculateHaversineDistance(
-                    latitude, longitude,
-                    zone.getLatitude().doubleValue(), 
-                    zone.getLongitude().doubleValue()
-                );
-                isWithinZone = distance <= zone.getRadiusMeters();
+            if (useAdvancedAlgorithms) {
+                // Use advanced algorithms with adaptive selection
+                AdvancedLocationValidationResult advancedResult = validateLocationAdvanced(
+                    latitude, longitude, zone, gpsAccuracy);
+                isWithinZone = advancedResult.isWithinZone();
+                distance = advancedResult.getDistance();
+                confidence = advancedResult.getConfidence();
+                algorithmUsed = advancedResult.getAlgorithmUsed();
             } else {
-                LocationValidationResult result = new LocationValidationResult();
-                result.setValid(false);
-                result.setMessage("Zone has no valid boundaries");
-                return result;
+                // Use legacy algorithms for backward compatibility
+                if (zone.hasPolygon()) {
+                    isWithinZone = isPointInPolygon(latitude, longitude, zone.getPolygonCoordinatesJson());
+                } else if (zone.getRadiusMeters() != null) {
+                    distance = calculateHaversineDistance(
+                        latitude, longitude,
+                        zone.getLatitude().doubleValue(), 
+                        zone.getLongitude().doubleValue()
+                    );
+                    isWithinZone = distance <= zone.getRadiusMeters();
+                } else {
+                    LocationValidationResult result = new LocationValidationResult();
+                    result.setValid(false);
+                    result.setMessage("Zone has no valid boundaries");
+                    return result;
+                }
             }
             
             LocationValidationResult finalResult = new LocationValidationResult();
@@ -106,6 +144,14 @@ public class EnhancedGeofencingService {
             finalResult.setZoneType(zone.getZoneType());
             finalResult.setZoneCategory(zone.getZoneCategory());
             finalResult.setMessage(isWithinZone ? "Vendor within assigned zone" : "Vendor outside assigned zone");
+            
+            // Add confidence and algorithm info if using advanced algorithms
+            if (useAdvancedAlgorithms) {
+                finalResult.setConfidence(confidence);
+                finalResult.setAlgorithmUsed(algorithmUsed);
+                finalResult.setGpsAccuracy(gpsAccuracy);
+            }
+            
             return finalResult;
                 
         } catch (Exception e) {
@@ -213,20 +259,217 @@ public class EnhancedGeofencingService {
     }
     
     /**
-     * Calculate distance between two points (Haversine formula)
+     * Calculate distance between two points (Haversine formula) - Legacy method
      */
     public double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
+        return ImprovedHaversine.calculateDistance(lat1, lon1, lat2, lon2);
+    }
+    
+    /**
+     * Advanced location validation using adaptive algorithms
+     */
+    private AdvancedLocationValidationResult validateLocationAdvanced(
+            double latitude, double longitude, Zone zone, double gpsAccuracy) {
         
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
+        long startTime = System.nanoTime();
         
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                   Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-                   Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        // Analyze zone characteristics
+        ZoneCharacteristics characteristics = analyzeZoneCharacteristics(zone);
         
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        // Select optimal algorithm
+        AlgorithmChoice algorithmChoice = algorithmSelector.selectOptimalAlgorithm(characteristics);
         
-        return EARTH_RADIUS * c; // Distance in meters
+        boolean isWithinZone = false;
+        double distance = 0.0;
+        String algorithmUsed = algorithmChoice.getDistanceAlgorithm().name();
+        
+        if (zone.hasPolygon()) {
+            // Use polygon validation with selected algorithm
+            List<Coordinate> coordinates = parsePolygonCoordinates(zone.getPolygonCoordinatesJson());
+            
+            if (coordinates.isEmpty()) {
+                return new AdvancedLocationValidationResult(false, 0.0, 0.0, "ERROR");
+            }
+            
+            ContainmentResult containmentResult;
+            
+            switch (algorithmChoice.getContainmentAlgorithm()) {
+                case RTREE_INDEXED:
+                    containmentResult = performRTreeContainment(latitude, longitude, coordinates);
+                    break;
+                case WINDING_NUMBER:
+                    containmentResult = PolygonContainment.isPointInPolygon(latitude, longitude, coordinates);
+                    break;
+                case OPTIMIZED_RAY_CASTING:
+                default:
+                    containmentResult = PolygonContainment.simpleRayCasting(latitude, longitude, coordinates);
+                    break;
+            }
+            
+            isWithinZone = containmentResult.isInside();
+            distance = containmentResult.getDistance();
+            algorithmUsed = algorithmChoice.getContainmentAlgorithm().name();
+            
+        } else if (zone.getRadiusMeters() != null) {
+            // Use radius-based validation with selected distance algorithm
+            switch (algorithmChoice.getDistanceAlgorithm()) {
+                case VINCENTY:
+                    GeodesicResult vincentyResult = VincentyDistance.calculateDistance(
+                        latitude, longitude,
+                        zone.getLatitude().doubleValue(),
+                        zone.getLongitude().doubleValue());
+                    distance = vincentyResult.getDistance();
+                    break;
+                case FAST_EUCLIDEAN:
+                    distance = FastEuclidean.calculateDistance(
+                        latitude, longitude,
+                        zone.getLatitude().doubleValue(),
+                        zone.getLongitude().doubleValue());
+                    break;
+                case IMPROVED_HAVERSINE:
+                default:
+                    distance = ImprovedHaversine.calculateDistance(
+                        latitude, longitude,
+                        zone.getLatitude().doubleValue(),
+                        zone.getLongitude().doubleValue());
+                    break;
+            }
+            
+            // Apply GPS accuracy-aware threshold
+            double adaptiveThreshold = calculateAdaptiveThreshold(zone.getRadiusMeters(), gpsAccuracy);
+            isWithinZone = distance <= adaptiveThreshold;
+        }
+        
+        // Calculate confidence based on GPS accuracy and algorithm
+        double confidence = calculateConfidence(isWithinZone, distance, gpsAccuracy, characteristics);
+        
+        long processingTime = (System.nanoTime() - startTime) / 1_000_000;
+        log.debug("Advanced validation completed in {}ms using {} algorithm. Confidence: {}", 
+                   processingTime, algorithmUsed, confidence);
+        
+        return new AdvancedLocationValidationResult(isWithinZone, distance, confidence, algorithmUsed);
+    }
+    
+    /**
+     * Calculate adaptive threshold based on GPS accuracy
+     */
+    private double calculateAdaptiveThreshold(double baseThreshold, double gpsAccuracy) {
+        // Adjust threshold based on GPS accuracy
+        // Poor GPS accuracy (high value) = more lenient threshold
+        // Excellent GPS accuracy (low value) = stricter threshold
+        
+        if (gpsAccuracy <= 3.0) {
+            // Excellent GPS - use 80% of threshold
+            return baseThreshold * 0.8;
+        } else if (gpsAccuracy <= 10.0) {
+            // Good GPS - use 90% of threshold
+            return baseThreshold * 0.9;
+        } else if (gpsAccuracy <= 20.0) {
+            // Fair GPS - use 100% of threshold
+            return baseThreshold;
+        } else if (gpsAccuracy <= 50.0) {
+            // Poor GPS - use 120% of threshold
+            return baseThreshold * 1.2;
+        } else {
+            // Very poor GPS - use 150% of threshold
+            return baseThreshold * 1.5;
+        }
+    }
+    
+    /**
+     * Calculate confidence score based on multiple factors
+     */
+    private double calculateConfidence(boolean isWithinZone, double distance, 
+                                       double gpsAccuracy, ZoneCharacteristics characteristics) {
+        double confidence = 1.0;
+        
+        // Adjust for GPS accuracy
+        if (gpsAccuracy > 50.0) {
+            confidence *= 0.5; // Very poor GPS
+        } else if (gpsAccuracy > 20.0) {
+            confidence *= 0.7; // Poor GPS
+        } else if (gpsAccuracy > 10.0) {
+            confidence *= 0.85; // Fair GPS
+        } else if (gpsAccuracy <= 3.0) {
+            confidence *= 1.1; // Excellent GPS
+        }
+        
+        // Adjust for zone complexity
+        if (characteristics.getVertexCount() > 100) {
+            confidence *= 0.95; // Complex zones
+        }
+        
+        // Adjust for distance from boundary
+        if (!isWithinZone && distance < 5.0) {
+            confidence *= 0.7; // Near boundary, less certain
+        } else if (!isWithinZone && distance > 50.0) {
+            confidence *= 1.05; // Far from boundary, more certain
+        }
+        
+        // Ensure confidence is within bounds
+        return Math.max(0.1, Math.min(1.0, confidence));
+    }
+    
+    /**
+     * Analyze zone characteristics for algorithm selection
+     */
+    private ZoneCharacteristics analyzeZoneCharacteristics(Zone zone) {
+        return zoneCharacteristicsCache.computeIfAbsent(zone.getId(), id -> {
+            ZoneCharacteristics characteristics = new ZoneCharacteristics();
+            
+            int vertexCount = zone.hasPolygon() ? 
+                parsePolygonCoordinates(zone.getPolygonCoordinatesJson()).size() : 2;
+            characteristics.setVertexCount(vertexCount);
+            
+            characteristics.setZoneCount((int) zoneRepository.countActiveZones());
+            
+            double maxDistance = zone.getRadiusMeters() != null ? 
+                zone.getRadiusMeters() : 1000.0;
+            characteristics.setMaxDistance(maxDistance);
+            
+            characteristics.setRequiresHighPrecision(maxDistance > 1000);
+            characteristics.setSimpleZone(vertexCount <= 10);
+            
+            return characteristics;
+        });
+    }
+    
+    /**
+     * R-tree based containment for complex polygons
+     */
+    private ContainmentResult performRTreeContainment(double latitude, double longitude, 
+                                                       List<Coordinate> coordinates) {
+        // Initialize R-tree if not already done
+        if (polygonRTree == null) {
+            initializeRTree();
+        }
+        
+        // For containment check, we use the polygon directly
+        ContainmentResult result = PolygonContainment.isPointInPolygon(latitude, longitude, coordinates);
+        
+        return result;
+    }
+    
+    /**
+     * Initialize R-tree index for all zones
+     */
+    private void initializeRTree() {
+        log.info("Initializing R-tree index for polygon zones");
+        polygonRTree = new RTreeIndexing.PolygonRTree();
+        
+        List<Zone> allZones = zoneRepository.findAllActiveZones();
+        
+        for (Zone zone : allZones) {
+            if (zone.hasPolygon()) {
+                List<Coordinate> coordinates = parsePolygonCoordinates(zone.getPolygonCoordinatesJson());
+                if (!coordinates.isEmpty()) {
+                    RTreeIndexing.PolygonZone polygonZone = new RTreeIndexing.PolygonZone(zone.getId().toString(), coordinates);
+                    polygonRTree.insert(polygonZone);
+                }
+            }
+        }
+        
+        log.info("R-tree index initialized with {} polygon zones", allZones.size());
     }
     
     /**
@@ -382,20 +625,28 @@ public class EnhancedGeofencingService {
 
 // ZoneCapacityInfo is now defined in dto package
 
-class Coordinate {
-    private double latitude;
-    private double longitude;
+// Use Coordinate from AdvancedGeofencingAlgorithms instead of local class
+// class Coordinate is now imported from com.smc.svms.algorithm.AdvancedGeofencingAlgorithms
+
+/**
+ * Result of advanced location validation
+ */
+class AdvancedLocationValidationResult {
+    private boolean isWithinZone;
+    private double distance;
+    private double confidence;
+    private String algorithmUsed;
     
-    public Coordinate() {}
-    
-    public Coordinate(double latitude, double longitude) {
-        this.latitude = latitude;
-        this.longitude = longitude;
+    public AdvancedLocationValidationResult(boolean isWithinZone, double distance, 
+                                            double confidence, String algorithmUsed) {
+        this.isWithinZone = isWithinZone;
+        this.distance = distance;
+        this.confidence = confidence;
+        this.algorithmUsed = algorithmUsed;
     }
     
-    public double getLatitude() { return latitude; }
-    public void setLatitude(double latitude) { this.latitude = latitude; }
-    
-    public double getLongitude() { return longitude; }
-    public void setLongitude(double longitude) { this.longitude = longitude; }
+    public boolean isWithinZone() { return isWithinZone; }
+    public double getDistance() { return distance; }
+    public double getConfidence() { return confidence; }
+    public String getAlgorithmUsed() { return algorithmUsed; }
 }

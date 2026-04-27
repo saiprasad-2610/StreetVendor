@@ -841,12 +841,36 @@ const QRScanner = () => {
                    <ShieldCheck size={14} /> GPS + Photo
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between border-b border-white/5 pb-2">
                 <span className="text-gray-400">Distance Error</span>
                 <span className="font-bold text-red-400">
                   {scanResult.distance !== null ? `${scanResult.distance.toFixed(2)} meters` : 'N/A'}
                 </span>
               </div>
+              {scanResult.confidence !== null && (
+                <div className="flex justify-between border-b border-white/5 pb-2">
+                  <span className="text-gray-400">Confidence Score</span>
+                  <span className={`font-bold ${scanResult.confidence >= 0.8 ? 'text-green-400' : scanResult.confidence >= 0.6 ? 'text-yellow-400' : 'text-red-400'}`}>
+                    {(scanResult.confidence * 100).toFixed(0)}%
+                  </span>
+                </div>
+              )}
+              {scanResult.algorithmUsed && (
+                <div className="flex justify-between border-b border-white/5 pb-2">
+                  <span className="text-gray-400">Algorithm</span>
+                  <span className="font-bold text-blue-400 text-xs">
+                    {scanResult.algorithmUsed}
+                  </span>
+                </div>
+              )}
+              {scanResult.gpsAccuracy !== null && scanResult.gpsAccuracy !== undefined && (
+                <div className="flex justify-between">
+                  <span className="text-gray-400">GPS Accuracy</span>
+                  <span className={`font-bold ${scanResult.gpsAccuracy <= 10 ? 'text-green-400' : scanResult.gpsAccuracy <= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
+                    ±{scanResult.gpsAccuracy.toFixed(1)}m
+                  </span>
+                </div>
+              )}
             </div>
 
             {scanResult.validationStatus !== 'VALID' && (

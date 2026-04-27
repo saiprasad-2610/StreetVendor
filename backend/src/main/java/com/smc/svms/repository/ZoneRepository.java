@@ -69,4 +69,10 @@ public interface ZoneRepository extends JpaRepository<Zone, Long> {
         @Param("minLng") Double minLng,
         @Param("maxLng") Double maxLng
     );
+
+    /**
+     * Count all active zones
+     */
+    @Query("SELECT COUNT(z) FROM Zone z WHERE z.isActive = true")
+    long countActiveZones();
 }

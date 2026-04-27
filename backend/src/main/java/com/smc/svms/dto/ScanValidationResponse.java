@@ -10,6 +10,10 @@ public class ScanValidationResponse {
     private Double distance;
     private String message;
     
+    // Advanced geofencing fields
+    private Double confidence;
+    private String algorithmUsed;
+    
     public ScanValidationResponse() {}
     
     public static Builder builder() { return new Builder(); }
@@ -47,6 +51,16 @@ public class ScanValidationResponse {
             return this; 
         }
         
+        public Builder confidence(Double confidence) { 
+            response.confidence = confidence; 
+            return this; 
+        }
+        
+        public Builder algorithmUsed(String algorithmUsed) { 
+            response.algorithmUsed = algorithmUsed; 
+            return this; 
+        }
+        
         public ScanValidationResponse build() { 
             return response; 
         }
@@ -59,4 +73,6 @@ public class ScanValidationResponse {
     public ValidationStatus getValidationStatus() { return validationStatus; }
     public Double getDistance() { return distance; }
     public String getMessage() { return message; }
+    public Double getConfidence() { return confidence; }
+    public String getAlgorithmUsed() { return algorithmUsed; }
 }
