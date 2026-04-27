@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle, Polygon } from '@react-google-maps/api';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { MapPin, User, Calendar, IndianRupee, AlertCircle, Phone } from 'lucide-react';
@@ -35,8 +35,10 @@ const MapView = () => {
 
   const fetchZones = async () => {
     try {
-      const response = await axios.get('/api/zones'); // Assuming this endpoint exists
-      setZones(response.data);
+      const response = await axios.get('/api/zones');
+      const raw = response.data;
+      const zonesData = Array.isArray(raw) ? raw : raw?.data || [];
+      setZones(zonesData);
     } catch (err) {
       console.error("Failed to fetch zones", err);
     }
@@ -98,18 +100,32 @@ const MapView = () => {
           >
             {/* Zones / Allocated Streets */}
             {zones.map(zone => (
-              <Circle
-                key={`zone-${zone.id}`}
-                center={{ lat: zone.latitude, lng: zone.longitude }}
-                radius={zone.radiusMeters}
-                options={{
-                  fillColor: zone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
-                  fillOpacity: 0.15,
-                  strokeColor: zone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
-                  strokeOpacity: 0.5,
-                  strokeWeight: 2,
-                }}
-              />
+              zone.polygonCoordinates ? (
+                <Polygon
+                  key={`zone-${zone.id}`}
+                  paths={JSON.parse(zone.polygonCoordinates)}
+                  options={{
+                    fillColor: zone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                    fillOpacity: 0.25,
+                    strokeColor: zone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 3,
+                  }}
+                />
+              ) : (
+                <Circle
+                  key={`zone-${zone.id}`}
+                  center={{ lat: Number(zone.latitude), lng: Number(zone.longitude) }}
+                  radius={zone.radiusMeters}
+                  options={{
+                    fillColor: zone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                    fillOpacity: 0.2,
+                    strokeColor: zone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 3,
+                  }}
+                />
+              )
             ))}
 
             {/* Vendor Markers */}

@@ -23,7 +23,9 @@ const VendorChallans = () => {
   const fetchChallans = async () => {
     try {
       const response = await axios.get('/api/challans/my');
-      setChallans(response.data);
+      // Backend returns ApiResponse wrapper, need to access response.data.data
+      const challansData = response.data?.data || response.data;
+      setChallans(challansData);
     } catch (err) {
       console.error("Failed to fetch challans", err);
     } finally {
@@ -34,8 +36,13 @@ const VendorChallans = () => {
   const handlePayment = async (challan) => {
     setPaying(challan.id);
     try {
+      console.log("Starting payment for challan:", challan.id);
+      console.log("Challan details:", challan);
+
       // 1. Create Order on Backend
       const orderRes = await axios.post(`/api/payments/create-order/${challan.id}`);
+      console.log("Order response:", orderRes.data);
+
       const { orderId, amount, currency, keyId } = orderRes.data;
 
       // 2. Open Razorpay Checkout
@@ -47,6 +54,7 @@ const VendorChallans = () => {
         description: `Challan Payment: ${challan.challanNumber}`,
         order_id: orderId,
         handler: async (response) => {
+          console.log("Payment response:", response);
           // 3. Verify Payment on Backend
           try {
             const verifyRes = await axios.post('/api/payments/verify', {
@@ -55,6 +63,7 @@ const VendorChallans = () => {
               razorpaySignature: response.razorpay_signature,
               challanId: challan.id
             });
+            console.log("Verification response:", verifyRes.data);
 
             if (verifyRes.data) {
               alert("Payment Successful!");
@@ -63,7 +72,8 @@ const VendorChallans = () => {
               alert("Payment Verification Failed!");
             }
           } catch (err) {
-            alert("Verification Error: " + err.message);
+            console.error("Verification error:", err);
+            alert("Verification Error: " + (err.response?.data?.message || err.message));
           }
         },
         prefill: {
@@ -72,14 +82,25 @@ const VendorChallans = () => {
         },
         theme: {
           color: "#1e3a8a" // smc-blue
+        },
+        modal: {
+          ondismiss: function() {
+            console.log("Payment modal dismissed");
+            setPaying(null);
+          }
         }
       };
 
       const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function(response) {
+        console.error("Payment failed:", response);
+        alert("Payment Failed: " + response.error.description);
+        setPaying(null);
+      });
       rzp.open();
     } catch (err) {
+      console.error("Payment initiation error:", err);
       alert("Payment Initiation Failed: " + (err.response?.data?.message || err.message));
-    } finally {
       setPaying(null);
     }
   };

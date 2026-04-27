@@ -1,0 +1,98 @@
+package com.smc.svms.controller;
+
+import com.smc.svms.dto.AdvancedLocationValidationResult;
+import com.smc.svms.dto.ScanRequest;
+import com.smc.svms.service.AdvancedGeofencingService;
+import com.smc.svms.service.ChallanService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/advanced-scan")
+@RequiredArgsConstructor
+@Slf4j
+public class AdvancedScanController {
+
+    private final AdvancedGeofencingService advancedGeofencingService;
+    private final ChallanService challanService;
+
+    @PostMapping("/validate")
+    public ResponseEntity<AdvancedLocationValidationResult> validateLocationAdvanced(
+            @RequestBody AdvancedScanRequest request) {
+        
+        log.info("Advanced scan validation request for vendor: {} at ({}, {}) with accuracy {}m", 
+                request.getVendorId(), request.getLatitude(), request.getLongitude(), request.getGpsAccuracy());
+        
+        try {
+            AdvancedLocationValidationResult result = advancedGeofencingService.validateVendorLocationAdvanced(
+                request.getVendorId(),
+                request.getLatitude(),
+                request.getLongitude(),
+                request.getGpsAccuracy(),
+                request.getDeviceId(),
+                request.getWeatherCondition()
+            );
+            
+            // If validation fails with high confidence, issue automatic challan
+            if (!result.isValid() && result.getConfidence() > 0.7 && result.getViolationRisk() > 0.6) {
+                log.info("Issuing automatic challan for vendor {} due to high-risk violation", request.getVendorId());
+                // challanService.issueAdvancedChallan(request, result);
+            }
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error in advanced scan validation", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    @GetMapping("/patterns/{vendorId}")
+    public ResponseEntity<?> getVendorPatterns(@PathVariable Long vendorId) {
+        try {
+            // Implementation would return vendor's historical patterns
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            log.error("Error fetching vendor patterns", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+    
+    @GetMapping("/risk-assessment/{vendorId}")
+    public ResponseEntity<?> getVendorRiskAssessment(@PathVariable Long vendorId) {
+        try {
+            // Implementation would return comprehensive risk assessment
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            log.error("Error generating risk assessment", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+}
+
+// Enhanced scan request with additional parameters
+class AdvancedScanRequest extends ScanRequest {
+    private Double gpsAccuracy;
+    private String deviceId;
+    private String weatherCondition;
+    private String deviceType;
+    private String networkType;
+    
+    // Getters and setters
+    public Double getGpsAccuracy() { return gpsAccuracy; }
+    public void setGpsAccuracy(Double gpsAccuracy) { this.gpsAccuracy = gpsAccuracy; }
+    
+    public String getDeviceId() { return deviceId; }
+    public void setDeviceId(String deviceId) { this.deviceId = deviceId; }
+    
+    public String getWeatherCondition() { return weatherCondition; }
+    public void setWeatherCondition(String weatherCondition) { this.weatherCondition = weatherCondition; }
+    
+    public String getDeviceType() { return deviceType; }
+    public void setDeviceType(String deviceType) { this.deviceType = deviceType; }
+    
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
+}

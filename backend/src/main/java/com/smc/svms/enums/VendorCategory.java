@@ -6,5 +6,10 @@ public enum VendorCategory {
     FOOD,
     TEA,
     PAN_SHOP,
+    RETAIL,
+    SERVICES,
+    CLOTHING,
+    ELECTRONICS,
+    GENERAL,
     OTHER
 }

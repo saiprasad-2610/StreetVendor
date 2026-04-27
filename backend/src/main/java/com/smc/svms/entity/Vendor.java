@@ -4,7 +4,10 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.smc.svms.enums.VendorCategory;
 import com.smc.svms.enums.VendorStatus;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
@@ -15,12 +18,11 @@ import java.time.LocalDateTime;
     @Index(name = "idx_vendor_status", columnList = "status"),
     @Index(name = "idx_vendor_phone", columnList = "phone")
 })
-@Getter
-@Setter
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
-@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Vendor {
 
     @Id

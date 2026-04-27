@@ -71,4 +71,10 @@ public class VendorController {
         vendorService.deleteVendor(id);
         return ResponseEntity.noContent().build();
     }
+
+    @GetMapping("/zone/{zoneId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
+    public ResponseEntity<List<VendorDTO>> getVendorsByZone(@PathVariable Long zoneId) {
+        return ResponseEntity.ok(vendorService.getVendorsByZone(zoneId));
+    }
 }

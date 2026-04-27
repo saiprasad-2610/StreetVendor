@@ -1,0 +1,13 @@
+package com.smc.svms.enums;
+
+public enum ValidationType {
+    VALID,
+    BOUNDARY_VIOLATION,
+    TIME_VIOLATION,
+    CAPACITY_VIOLATION,
+    GPS_UNRELIABLE,
+    PATTERN_VIOLATION,
+    WEATHER_RESTRICTION,
+    ZONE_NOT_ASSIGNED,
+    SYSTEM_ERROR
+}

@@ -1,0 +1,253 @@
+package com.smc.svms.service;
+
+import com.smc.svms.dto.ScanRequest;
+import com.smc.svms.dto.ScanValidationResponse;
+import com.smc.svms.entity.Vendor;
+import com.smc.svms.enums.ValidationStatus;
+import com.smc.svms.repository.VendorRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Optimized Scan Service using advanced algorithms
+ * Replaces Haversine with Vincenty's algorithm for better accuracy
+ * Includes adaptive thresholds and GPS quality validation
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class OptimizedScanService implements ScanService {
+
+    private final VendorRepository vendorRepository;
+    private final ChallanService challanService;
+
+    @Value("${app.location.threshold-meters}")
+    private double baseThresholdMeters;
+
+    @Override
+    @Transactional
+    public ScanValidationResponse validateVendorLocation(ScanRequest request) {
+        log.info("Optimized validation for vendor {} at ({}, {}) with accuracy {}m", 
+                request.getVendorId(), request.getLatitude(), request.getLongitude(), 
+                request.getGpsAccuracy() != null ? request.getGpsAccuracy() : "unknown");
+
+        Vendor vendor = vendorRepository.findByVendorId(request.getVendorId())
+                .orElseThrow(() -> new RuntimeException("Vendor not found with id: " + request.getVendorId()));
+
+        if (vendor.getLocation() == null) {
+            throw new RuntimeException("Vendor has no registered location");
+        }
+
+        // Use Vincenty's algorithm for high-precision distance calculation
+        double distance = calculateVincentyDistance(
+                request.getLatitude(), 
+                request.getLongitude(),
+                vendor.getLocation().getLatitude().doubleValue(),
+                vendor.getLocation().getLongitude().doubleValue()
+        );
+
+        // Apply adaptive threshold based on GPS accuracy
+        double adaptiveThreshold = calculateAdaptiveThreshold(request.getGpsAccuracy(), distance);
+        
+        // Determine validation status with confidence scoring
+        ValidationStatus status = distance <= adaptiveThreshold ? ValidationStatus.VALID : ValidationStatus.INVALID;
+        double confidence = calculateConfidence(request.getGpsAccuracy(), distance, adaptiveThreshold);
+        
+        String message = generateValidationMessage(status, distance, adaptiveThreshold, confidence);
+
+        // If location is invalid with high confidence, issue an automatic challan
+        if (status == ValidationStatus.INVALID && confidence > 0.7) {
+            String locationStr = String.format("%.6f, %.6f", request.getLatitude(), request.getLongitude());
+            challanService.issueAutomaticChallan(
+                vendor, 
+                "Advanced Location Mismatch: Vendor found at " + locationStr + 
+                " (Distance: " + Math.round(distance) + "m, Threshold: " + Math.round(adaptiveThreshold) + "m)", 
+                locationStr, 
+                request.getImageProofUrl()
+            );
+            log.info("Automatic challan issued for vendor {} - Distance: {}m, Threshold: {}m", 
+                    vendor.getVendorId(), Math.round(distance), Math.round(adaptiveThreshold));
+        }
+
+        return ScanValidationResponse.builder()
+                .vendorId(vendor.getVendorId())
+                .vendorName(vendor.getName())
+                .category(vendor.getCategory().name())
+                .validationStatus(status)
+                .distance(distance)
+                .message(message)
+                .build();
+    }
+
+    /**
+     * Vincenty's algorithm for high-precision geodesic distance calculation
+     * Accuracy: ~0.5mm compared to Haversine's ~0.5% error
+     */
+    private double calculateVincentyDistance(double lat1, double lon1, double lat2, double lon2) {
+        // WGS84 ellipsoid parameters
+        double a = 6378137.0; // Semi-major axis (meters)
+        double f = 1.0 / 298.257223563; // Flattening
+        double b = (1 - f) * a; // Semi-minor axis (meters)
+
+        double phi1 = Math.toRadians(lat1);
+        double phi2 = Math.toRadians(lat2);
+        double lambda1 = Math.toRadians(lon1);
+        double lambda2 = Math.toRadians(lon2);
+
+        double U1 = Math.atan((1 - f) * Math.tan(phi1));
+        double U2 = Math.atan((1 - f) * Math.tan(phi2));
+        double L = lambda2 - lambda1;
+
+        double lambda = L;
+        double sinU1 = Math.sin(U1), cosU1 = Math.cos(U1);
+        double sinU2 = Math.sin(U2), cosU2 = Math.cos(U2);
+
+        double sinSigma, cosSigma, sigma, sinAlpha, cosSqAlpha, cos2SigmaM;
+        double lambdaPrev;
+        int iterationCount = 0;
+
+        do {
+            sinSigma = Math.sqrt(Math.pow(cosU2 * Math.sin(lambda), 2) +
+                               Math.pow(cosU1 * sinU2 - sinU1 * cosU2 * Math.cos(lambda), 2));
+
+            if (sinSigma == 0) {
+                return 0.0; // Co-incident points
+            }
+
+            cosSigma = sinU1 * sinU2 + cosU1 * cosU2 * Math.cos(lambda);
+            sigma = Math.atan2(sinSigma, cosSigma);
+            sinAlpha = cosU1 * cosU2 * Math.sin(lambda) / sinSigma;
+            cosSqAlpha = 1 - sinAlpha * sinAlpha;
+            cos2SigmaM = cosSigma - 2 * sinU1 * sinU2 / cosSqAlpha;
+
+            if (Double.isNaN(cos2SigmaM)) {
+                cos2SigmaM = 0; // Equatorial line
+            }
+
+            lambdaPrev = lambda;
+            double C = f / 16 * cosSqAlpha * (4 + f * (4 - 3 * cosSqAlpha));
+            lambda = L + (1 - C) * f * sinAlpha *
+                     (sigma + C * sinSigma * (cos2SigmaM + C * cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM)));
+
+            iterationCount++;
+        } while (Math.abs(lambda - lambdaPrev) > 1e-12 && iterationCount < 100);
+
+        if (iterationCount >= 100) {
+            log.warn("Vincenty formula failed to converge, falling back to Haversine for coordinates ({}, {}) to ({}, {})", 
+                    lat1, lon1, lat2, lon2);
+            return calculateHaversineDistance(lat1, lon1, lat2, lon2);
+        }
+
+        double uSq = cosSqAlpha * (a * a - b * b) / (b * b);
+        double A = 1 + uSq / 16384 * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+        double B = uSq / 1024 * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
+
+        double deltaSigma = B * sinSigma * (cos2SigmaM + B / 4 *
+                         (cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM) -
+                          B / 6 * cos2SigmaM * (-3 + 4 * sinSigma * sinSigma) *
+                          (-3 + 4 * cos2SigmaM * cos2SigmaM)));
+
+        double distance = b * A * (sigma - deltaSigma);
+
+        return distance; // Distance in meters
+    }
+
+    /**
+     * Fallback Haversine calculation
+     */
+    private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                   Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                   Math.sin(dLon / 2) * Math.sin(dLon / 2);
+
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return 6371000 * c; // Distance in meters
+    }
+
+    /**
+     * Calculate adaptive threshold based on GPS accuracy and distance
+     */
+    private double calculateAdaptiveThreshold(Double gpsAccuracy, double distance) {
+        double threshold = baseThresholdMeters;
+
+        // Adjust threshold based on GPS accuracy
+        if (gpsAccuracy != null) {
+            if (gpsAccuracy <= 3.0) {
+                // Excellent GPS - use stricter threshold
+                threshold *= 0.8;
+            } else if (gpsAccuracy <= 8.0) {
+                // Good GPS - normal threshold
+                threshold *= 1.0;
+            } else if (gpsAccuracy <= 15.0) {
+                // Acceptable GPS - more lenient threshold
+                threshold *= 1.5;
+            } else {
+                // Poor GPS - very lenient threshold
+                threshold *= 2.0;
+            }
+        }
+
+        // Adjust threshold based on distance (farther distances get more leniency)
+        if (distance > 100) {
+            threshold *= 1.2; // Long distances have more error margin
+        } else if (distance > 50) {
+            threshold *= 1.1;
+        }
+
+        return threshold;
+    }
+
+    /**
+     * Calculate confidence score for the validation
+     */
+    private double calculateConfidence(Double gpsAccuracy, double distance, double threshold) {
+        double confidence = 1.0;
+
+        // GPS accuracy impact on confidence
+        if (gpsAccuracy != null) {
+            if (gpsAccuracy <= 3.0) {
+                confidence *= 1.0; // Excellent GPS
+            } else if (gpsAccuracy <= 8.0) {
+                confidence *= 0.9; // Good GPS
+            } else if (gpsAccuracy <= 15.0) {
+                confidence *= 0.7; // Acceptable GPS
+            } else {
+                confidence *= 0.4; // Poor GPS
+            }
+        } else {
+            confidence *= 0.8; // Unknown GPS accuracy
+        }
+
+        // Distance from threshold impact
+        double distanceFromThreshold = Math.abs(distance - threshold);
+        if (distanceFromThreshold < 1.0) {
+            confidence *= 0.9; // Very close to threshold
+        } else if (distanceFromThreshold > 10.0) {
+            confidence *= 1.0; // Clearly valid or invalid
+        } else {
+            confidence *= 0.95; // Moderately close to threshold
+        }
+
+        return Math.max(0.1, Math.min(1.0, confidence));
+    }
+
+    /**
+     * Generate detailed validation message
+     */
+    private String generateValidationMessage(ValidationStatus status, double distance, double threshold, double confidence) {
+        if (status == ValidationStatus.VALID) {
+            return String.format("Vendor is in correct location (Distance: %.1fm, Accuracy: %.0f%%)", 
+                    distance, confidence * 100);
+        } else {
+            return String.format("Vendor is outside designated area (Distance: %.1fm, Threshold: %.1fm, Accuracy: %.0f%%)", 
+                    distance, threshold, confidence * 100);
+        }
+    }
+}

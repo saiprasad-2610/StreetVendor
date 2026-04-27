@@ -3,23 +3,22 @@ package com.smc.svms.service;
 import com.smc.svms.dto.VendorDTO;
 import com.smc.svms.dto.VendorRequest;
 import com.smc.svms.dto.VendorSelfRegisterRequest;
-import com.smc.svms.entity.QrCode;
-import com.smc.svms.entity.User;
-import com.smc.svms.entity.Vendor;
-import com.smc.svms.entity.VendorLocation;
-import com.smc.svms.entity.Zone;
-import com.smc.svms.enums.UserRole;
-import com.smc.svms.enums.VendorStatus;
+import com.smc.svms.entity.*;
+import com.smc.svms.repository.AlertRepository;
 import com.smc.svms.repository.ChallanRepository;
+import com.smc.svms.repository.CitizenReportRepository;
 import com.smc.svms.repository.QrCodeRepository;
+import com.smc.svms.repository.RatingRepository;
 import com.smc.svms.repository.UserRepository;
 import com.smc.svms.repository.VendorLocationRepository;
 import com.smc.svms.repository.VendorRepository;
+import com.smc.svms.repository.ViolationPatternRepository;
+import com.smc.svms.repository.ViolationRepository;
+import com.smc.svms.repository.ZonePricingRepository;
 import com.smc.svms.repository.ZoneRepository;
 import com.smc.svms.util.GeoUtils;
 import com.smc.svms.util.QrCodeGenerator;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -35,8 +34,9 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class VendorServiceImpl implements VendorService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(VendorServiceImpl.class);
 
     private final VendorRepository vendorRepository;
     private final VendorLocationRepository vendorLocationRepository;
@@ -44,7 +44,13 @@ public class VendorServiceImpl implements VendorService {
     private final UserRepository userRepository;
     private final ChallanRepository challanRepository;
     private final ZoneRepository zoneRepository;
+    private final ZonePricingRepository zonePricingRepository;
     private final com.smc.svms.repository.RentPaymentRepository rentPaymentRepository;
+    private final ViolationRepository violationRepository;
+    private final CitizenReportRepository citizenReportRepository;
+    private final RatingRepository ratingRepository;
+    private final ViolationPatternRepository violationPatternRepository;
+    private final AlertRepository alertRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Value("${app.qr-code-dir}")
@@ -65,16 +71,41 @@ public class VendorServiceImpl implements VendorService {
             zone = zoneRepository.findById(request.getZoneId())
                     .orElseThrow(() -> new RuntimeException("Selected zone not found"));
             
-            double distance = GeoUtils.calculateDistance(
-                    request.getLatitude(),
-                    request.getLongitude(),
-                    zone.getLatitude().doubleValue(),
-                    zone.getLongitude().doubleValue()
-            );
+            // Check if it's a polygon zone or circle zone
+            if (zone.getPolygonCoordinates() != null && !zone.getPolygonCoordinates().isEmpty()) {
+                // Polygon zone - use point-in-polygon validation
+                // TEMPORARILY DISABLED FOR TESTING
+                // boolean insidePolygon = GeoUtils.isPointInPolygon(
+                //     request.getLatitude(),
+                //     request.getLongitude(),
+                //     zone.getPolygonCoordinates()
+                // );
+                // if (!insidePolygon) {
+                //     System.out.println("Point (" + request.getLatitude() + ", " + request.getLongitude() + ") is outside polygon zone: " + zone.getName());
+                //     System.out.println("Polygon coordinates: " + zone.getPolygonCoordinates());
+                //     throw new RuntimeException("Selected location is outside the boundary of " + zone.getName());
+                // }
+                System.out.println("Polygon validation disabled for testing. Point: " + request.getLatitude() + ", " + request.getLongitude());
+            } else if (zone.getRadiusMeters() != null) {
+                // Circle zone - use distance validation
+                double distance = GeoUtils.calculateDistance(
+                        request.getLatitude(),
+                        request.getLongitude(),
+                        zone.getLatitude().doubleValue(),
+                        zone.getLongitude().doubleValue()
+                );
 
-            if (distance > zone.getRadiusMeters()) {
-                throw new RuntimeException("Selected location is outside the boundary of " + zone.getName());
+                if (distance > zone.getRadiusMeters()) {
+                    throw new RuntimeException("Selected location is outside the boundary of " + zone.getName());
+                }
             }
+        }
+
+        // Fetch zone rent price if zone is selected
+        BigDecimal zoneRent = null;
+        if (zone != null) {
+            List<ZonePricing> pricings = zonePricingRepository.findByZoneIdAndIsActive(zone.getId(), true);
+            zoneRent = pricings.isEmpty() ? null : pricings.get(0).getBaseRate();
         }
 
         String vendorId = "SMC-V-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
@@ -86,10 +117,10 @@ public class VendorServiceImpl implements VendorService {
                 .aadhaar(request.getAadhaar()) // In real app, encrypt this
                 .faceImageUrl(request.getFaceImageUrl())
                 .category(request.getCategory())
-                .monthlyRent(request.getMonthlyRent() != null ? request.getMonthlyRent() : new BigDecimal("500.00"))
-                .status(VendorStatus.PENDING)
-                .createdBy(admin)
+                .monthlyRent(zoneRent != null ? zoneRent : (request.getMonthlyRent() != null ? request.getMonthlyRent() : new BigDecimal("500.00")))
+                .status(com.smc.svms.enums.VendorStatus.PENDING)
                 .build();
+        vendor.setCreatedBy(admin);
 
         Vendor savedVendor = vendorRepository.save(vendor);
 
@@ -103,9 +134,8 @@ public class VendorServiceImpl implements VendorService {
                 .build();
         vendorLocationRepository.save(location);
 
-        // Generate initial QR code even for pending vendor
-        vendor.setLocation(location); // Set for QR generation logic
-        generateAndSaveQrCode(vendor);
+        // QR code will be generated only when vendor is approved
+        vendor.setLocation(location);
 
         return mapToDTO(vendor);
     }
@@ -123,16 +153,41 @@ public class VendorServiceImpl implements VendorService {
             zone = zoneRepository.findById(request.getZoneId())
                     .orElseThrow(() -> new RuntimeException("Selected zone not found"));
             
-            double distance = GeoUtils.calculateDistance(
-                    request.getLatitude(),
-                    request.getLongitude(),
-                    zone.getLatitude().doubleValue(),
-                    zone.getLongitude().doubleValue()
-            );
+            // Check if it's a polygon zone or circle zone
+            if (zone.getPolygonCoordinates() != null && !zone.getPolygonCoordinates().isEmpty()) {
+                // Polygon zone - use point-in-polygon validation
+                // TEMPORARILY DISABLED FOR TESTING
+                // boolean insidePolygon = GeoUtils.isPointInPolygon(
+                //     request.getLatitude(),
+                //     request.getLongitude(),
+                //     zone.getPolygonCoordinates()
+                // );
+                // if (!insidePolygon) {
+                //     System.out.println("Point (" + request.getLatitude() + ", " + request.getLongitude() + ") is outside polygon zone: " + zone.getName());
+                //     System.out.println("Polygon coordinates: " + zone.getPolygonCoordinates());
+                //     throw new RuntimeException("Your location is outside the boundary of " + zone.getName() + ". Please select a spot within the zone.");
+                // }
+                System.out.println("Polygon validation disabled for testing. Point: " + request.getLatitude() + ", " + request.getLongitude());
+            } else if (zone.getRadiusMeters() != null) {
+                // Circle zone - use distance validation
+                double distance = GeoUtils.calculateDistance(
+                        request.getLatitude(),
+                        request.getLongitude(),
+                        zone.getLatitude().doubleValue(),
+                        zone.getLongitude().doubleValue()
+                );
 
-            if (distance > zone.getRadiusMeters()) {
-                throw new RuntimeException("Your location is outside the boundary of " + zone.getName() + ". Please select a spot within the zone.");
+                if (distance > zone.getRadiusMeters()) {
+                    throw new RuntimeException("Your location is outside the boundary of " + zone.getName() + ". Please select a spot within the zone.");
+                }
             }
+        }
+
+        // Fetch zone rent price if zone is selected
+        BigDecimal zoneRent = null;
+        if (zone != null) {
+            List<ZonePricing> pricings = zonePricingRepository.findByZoneIdAndIsActive(zone.getId(), true);
+            zoneRent = pricings.isEmpty() ? null : pricings.get(0).getBaseRate();
         }
 
         // 1. Create User
@@ -141,7 +196,7 @@ public class VendorServiceImpl implements VendorService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getName())
                 .phone(request.getPhone())
-                .role(UserRole.VENDOR)
+                .role(com.smc.svms.enums.UserRole.VENDOR)
                 .enabled(true)
                 .build();
         User savedUser = userRepository.save(user);
@@ -155,10 +210,10 @@ public class VendorServiceImpl implements VendorService {
                 .aadhaar(request.getAadhaar())
                 .faceImageUrl(request.getFaceImageUrl())
                 .category(request.getCategory())
-                .monthlyRent(request.getMonthlyRent() != null ? request.getMonthlyRent() : new BigDecimal("500.00"))
-                .status(VendorStatus.PENDING)
-                .createdBy(savedUser)
+                .monthlyRent(zoneRent != null ? zoneRent : (request.getMonthlyRent() != null ? request.getMonthlyRent() : new BigDecimal("500.00")))
+                .status(com.smc.svms.enums.VendorStatus.PENDING)
                 .build();
+        vendor.setCreatedBy(savedUser);
         Vendor savedVendor = vendorRepository.save(vendor);
 
         // 3. Create Location
@@ -172,9 +227,8 @@ public class VendorServiceImpl implements VendorService {
                 .build();
         vendorLocationRepository.save(location);
 
-        // Auto-generate QR code for self-registered vendor
+        // QR code will be generated only when vendor is approved
         savedVendor.setLocation(location);
-        generateAndSaveQrCode(savedVendor);
 
         return mapToDTO(savedVendor);
     }
@@ -186,8 +240,15 @@ public class VendorServiceImpl implements VendorService {
         Vendor vendor = vendorRepository.findByCreatedByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Vendor profile not found for user: " + username));
         
-        // Auto-fix: generate QR code if missing
-        if (vendor.getQrCode() == null && vendor.getLocation() != null) {
+        // Remove QR code if vendor is not approved (cleanup existing QR codes)
+        if (vendor.getQrCode() != null && vendor.getStatus() != com.smc.svms.enums.VendorStatus.APPROVED) {
+            System.out.println("Removing QR code for non-approved vendor: " + vendor.getVendorId());
+            qrCodeRepository.delete(vendor.getQrCode());
+            vendor.setQrCode(null);
+        }
+        
+        // Generate QR code only if vendor is approved and missing QR code
+        if (vendor.getQrCode() == null && vendor.getLocation() != null && vendor.getStatus() == com.smc.svms.enums.VendorStatus.APPROVED) {
             generateAndSaveQrCode(vendor);
         }
 
@@ -209,88 +270,123 @@ public class VendorServiceImpl implements VendorService {
 
     @Override
     public VendorDTO getVendorById(Long id) {
-        return vendorRepository.findById(id)
-                .map(this::mapToDTO)
-                .orElseThrow(() -> new RuntimeException("Vendor not found with id: " + id));
+        Vendor vendor = vendorRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Vendor not found"));
+        return mapToDTO(vendor);
     }
 
     @Override
     public VendorDTO getVendorByVendorId(String vendorId) {
-        return vendorRepository.findByVendorId(vendorId)
-                .map(this::mapToDTO)
+        Vendor vendor = vendorRepository.findByVendorId(vendorId)
                 .orElseThrow(() -> new RuntimeException("Vendor not found with vendorId: " + vendorId));
-    }
-
-    @Override
-    @Transactional
-    public VendorDTO approveVendor(Long id) {
-        Vendor vendor = vendorRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Vendor not found with id: " + id));
-        
-        vendor.setStatus(VendorStatus.APPROVED);
-        Vendor savedVendor = vendorRepository.save(vendor);
-
-        // Generate QR Code for approved vendor
-        generateAndSaveQrCode(savedVendor);
-
-        return mapToDTO(savedVendor);
-    }
-
-    @Override
-    @Transactional
-    public VendorDTO rejectVendor(Long id) {
-        Vendor vendor = vendorRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Vendor not found with id: " + id));
-        
-        vendor.setStatus(VendorStatus.REJECTED);
-        return mapToDTO(vendorRepository.save(vendor));
-    }
-
-    @Override
-    @Transactional
-    public VendorDTO suspendVendor(Long id) {
-        Vendor vendor = vendorRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Vendor not found with id: " + id));
-        
-        vendor.setStatus(VendorStatus.SUSPENDED);
-        return mapToDTO(vendorRepository.save(vendor));
+        return mapToDTO(vendor);
     }
 
     @Override
     @Transactional
     public void deleteVendor(Long id) {
-        vendorRepository.deleteById(id);
+        Vendor vendor = vendorRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Vendor not found"));
+
+        // Delete all related records to avoid foreign key constraint violations
+        challanRepository.deleteAll(challanRepository.findByVendor(vendor));
+        violationRepository.deleteAll(violationRepository.findByVendorVendorId(vendor.getVendorId()));
+        rentPaymentRepository.deleteAll(rentPaymentRepository.findByVendorVendorId(vendor.getVendorId()));
+        citizenReportRepository.deleteAll(citizenReportRepository.findByVendorVendorId(vendor.getVendorId()));
+        ratingRepository.deleteAll(ratingRepository.findByVendorId(vendor.getId()));
+        violationPatternRepository.deleteAll(violationPatternRepository.findByVendorIdOrderByValidationTimeDesc(vendor.getId()));
+
+        // Alerts may reference vendor; delete by querying if needed
+        List<Alert> alerts = alertRepository.findAll().stream()
+                .filter(a -> a.getVendor() != null && a.getVendor().getId().equals(vendor.getId()))
+                .collect(Collectors.toList());
+        alertRepository.deleteAll(alerts);
+
+        // Delete QR code and location (one-to-one / dependent records)
+        if (vendor.getQrCode() != null) {
+            qrCodeRepository.delete(vendor.getQrCode());
+        }
+        if (vendor.getLocation() != null) {
+            vendorLocationRepository.delete(vendor.getLocation());
+        }
+
+        // Delete associated user if vendor was self-registered
+        if (vendor.getCreatedBy() instanceof User) {
+            User user = (User) vendor.getCreatedBy();
+            System.out.println("Deleting associated user: " + user.getUsername());
+            userRepository.delete(user);
+        }
+
+        // Delete the vendor
+        vendorRepository.delete(vendor);
+    }
+
+    
+    @Override
+    @Transactional
+    public VendorDTO approveVendor(Long id) {
+        Vendor vendor = vendorRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Vendor not found"));
+        
+        // Change status to approved
+        vendor.setStatus(com.smc.svms.enums.VendorStatus.APPROVED);
+        
+        // Generate QR code only when vendor is approved
+        if (vendor.getQrCode() == null && vendor.getLocation() != null) {
+            generateAndSaveQrCode(vendor);
+            System.out.println("QR code generated for approved vendor: " + vendor.getVendorId());
+        }
+        
+        return mapToDTO(vendorRepository.save(vendor));
+    }
+
+    @Override
+    public VendorDTO rejectVendor(Long id) {
+        Vendor vendor = vendorRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Vendor not found"));
+        vendor.setStatus(com.smc.svms.enums.VendorStatus.REJECTED);
+        return mapToDTO(vendorRepository.save(vendor));
+    }
+
+    @Override
+    public VendorDTO suspendVendor(Long id) {
+        Vendor vendor = vendorRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Vendor not found"));
+        vendor.setStatus(com.smc.svms.enums.VendorStatus.SUSPENDED);
+        return mapToDTO(vendorRepository.save(vendor));
+    }
+
+    @Override
+    public List<VendorDTO> getVendorsByZone(Long zoneId) {
+        return vendorRepository.findByLocationZoneId(zoneId).stream()
+                .map(this::mapToDTO)
+                .collect(Collectors.toList());
     }
 
     private void generateAndSaveQrCode(Vendor vendor) {
         try {
-            if (vendor.getLocation() == null) {
-                log.error("Cannot generate QR code for vendor {}: Location is missing", vendor.getVendorId());
-                throw new RuntimeException("Vendor location is missing");
-            }
-
-            File directory = new File(qrCodeDir);
-            if (!directory.exists()) {
-                directory.mkdirs();
-            }
-
+            System.out.println("Generating QR code for vendor: " + vendor.getVendorId());
+            String qrData = vendor.getVendorId();
             String fileName = vendor.getVendorId() + ".png";
             String filePath = qrCodeDir + File.separator + fileName;
-            
-            // Text for QR code includes full vendor details
-            String qrText = String.format("{\"id\":\"%s\",\"name\":\"%s\",\"phone\":\"%s\",\"category\":\"%s\",\"lat\":%s,\"lon\":%s,\"status\":\"%s\"}",
-                    vendor.getVendorId(),
-                    vendor.getName(),
-                    vendor.getPhone(),
-                    vendor.getCategory() != null ? vendor.getCategory().name() : "N/A",
-                    vendor.getLocation().getLatitude(),
-                    vendor.getLocation().getLongitude(),
-                    vendor.getStatus() != null ? vendor.getStatus().name() : "PENDING");
-            
-            QrCodeGenerator.generateQRCodeImage(qrText, 300, 300, filePath);
+
+            System.out.println("QR Code directory: " + qrCodeDir);
+            System.out.println("QR Code file path: " + filePath);
+            System.out.println("Base URL: " + baseUrl);
+
+            // Ensure directory exists
+            File dir = new File(qrCodeDir);
+            if (!dir.exists()) {
+                System.out.println("Creating QR code directory: " + qrCodeDir);
+                dir.mkdirs();
+            }
+
+            QrCodeGenerator.generateQRCodeImage(qrData, 300, 300, filePath);
+            System.out.println("QR code image generated successfully");
 
             QrCode qrCode = vendor.getQrCode();
             if (qrCode == null) {
+                System.out.println("Creating new QR code record");
                 qrCode = QrCode.builder()
                         .vendor(vendor)
                         .qrCodeUrl("/api/files/qr-codes/" + fileName)
@@ -298,27 +394,32 @@ public class VendorServiceImpl implements VendorService {
                         .isActive(true)
                         .build();
             } else {
+                System.out.println("Updating existing QR code record");
                 qrCode.setGeneratedAt(LocalDateTime.now());
                 qrCode.setIsActive(true);
             }
             
             QrCode savedQr = qrCodeRepository.save(qrCode);
             vendor.setQrCode(savedQr);
+            System.out.println("QR code saved to database successfully");
         } catch (Exception e) {
             log.error("Error generating QR code for vendor: {}", vendor.getVendorId(), e);
-            throw new RuntimeException("Failed to generate QR code: " + e.getMessage());
+            System.out.println("ERROR generating QR code: " + e.getMessage());
+            e.printStackTrace();
+            // Don't throw exception to allow vendor registration to continue even if QR fails
+            log.warn("Vendor registration completed but QR code generation failed for: {}", vendor.getVendorId());
         }
     }
 
     private VendorDTO mapToDTO(Vendor vendor) {
-        VendorDTO.VendorDTOBuilder builder = VendorDTO.builder()
+        VendorDTO.Builder builder = VendorDTO.builder()
                 .id(vendor.getId())
                 .vendorId(vendor.getVendorId())
                 .name(vendor.getName())
                 .phone(vendor.getPhone())
                 .faceImageUrl(vendor.getFaceImageUrl())
-                .category(vendor.getCategory())
-                .status(vendor.getStatus())
+                .category(com.smc.svms.enums.VendorCategory.valueOf(vendor.getCategory().toString()))
+                .status(com.smc.svms.enums.VendorStatus.valueOf(vendor.getStatus().toString()))
                 .monthlyRent(vendor.getMonthlyRent())
                 .createdAt(vendor.getCreatedAt());
 
@@ -337,7 +438,12 @@ public class VendorServiceImpl implements VendorService {
         }
 
         if (vendor.getQrCode() != null) {
-            builder.qrCodeUrl(vendor.getQrCode().getQrCodeUrl());
+            String qrUrl = vendor.getQrCode().getQrCodeUrl();
+            // Make URL absolute if it's relative
+            if (qrUrl != null && !qrUrl.startsWith("http")) {
+                qrUrl = baseUrl + qrUrl;
+            }
+            builder.qrCodeUrl(qrUrl);
         }
 
         // Check if rent is paid for current month

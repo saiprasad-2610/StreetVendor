@@ -1,0 +1,118 @@
+package com.smc.svms.controller;
+
+import com.smc.svms.dto.ScanValidationResponse;
+import com.smc.svms.dto.ValidationResult;
+import com.smc.svms.service.SecureScanService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+@RestController
+@RequestMapping("/api/scan")
+@RequiredArgsConstructor
+@Slf4j
+public class SecureScanController {
+
+    private final SecureScanService secureScanService;
+
+    @PostMapping("/upload-and-validate")
+    public ResponseEntity<ScanValidationResponse> uploadAndValidate(
+            @RequestParam("vendorId") String vendorId,
+            @RequestParam("latitude") double latitude,
+            @RequestParam("longitude") double longitude,
+            @RequestParam("gpsAccuracy") Double gpsAccuracy,
+            @RequestParam("deviceId") String deviceId,
+            @RequestParam("weatherCondition") String weatherCondition,
+            @RequestParam("image") MultipartFile image) {
+        
+        log.info("Secure scan validation with photo upload for vendor: {} at ({}, {}) with accuracy {}m", 
+                vendorId, latitude, longitude, gpsAccuracy);
+        
+        try {
+            // Validate image authenticity first
+            ValidationResult imageValidation = secureScanService.validateImageAuthenticity(image);
+            if (!imageValidation.isValid()) {
+                log.warn("Fraud detected for vendor {}: {}", vendorId, imageValidation.getErrorMessage());
+                return ResponseEntity.badRequest()
+                    .body(createFraudResponse(imageValidation.getErrorMessage()));
+            }
+            
+            // Proceed with location validation
+            ScanValidationResponse response = secureScanService.validateVendorLocationWithPhoto(
+                vendorId, latitude, longitude, gpsAccuracy, deviceId, weatherCondition, image);
+            
+            log.info("Secure validation completed: {} - Distance: {}m", 
+                    response.getValidationStatus(), Math.round(response.getDistance()));
+            
+            return ResponseEntity.ok(response);
+            
+        } catch (Exception e) {
+            log.error("Error in secure scan validation", e);
+            return ResponseEntity.badRequest()
+                .body(createFraudResponse("Validation failed: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/algorithm-info")
+    public ResponseEntity<SecurityInfo> getAlgorithmInfo() {
+        return ResponseEntity.ok(SecurityInfo.builder()
+            .photoValidation("Mandatory")
+            .fraudDetection("Active")
+            .metadataVerification("Enabled")
+            .exifValidation("Required")
+            .watermarkVerification("Advanced")
+            .features(new String[]{
+                "Real-time photo capture",
+                "EXIF metadata validation", 
+                "Device fingerprinting",
+                "Geo-tag watermarking",
+                "Hidden metadata embedding",
+                "Checksum verification"
+            })
+            .build());
+    }
+
+    @GetMapping("/security-info")
+    public ResponseEntity<SecurityInfo> getSecurityInfo() {
+        return ResponseEntity.ok(SecurityInfo.builder()
+            .photoValidation("Mandatory")
+            .fraudDetection("Active")
+            .metadataVerification("Enabled")
+            .exifValidation("Required")
+            .watermarkVerification("Advanced")
+            .features(new String[]{
+                "Real-time photo capture",
+                "EXIF metadata validation", 
+                "Device fingerprinting",
+                "Geo-tag watermarking",
+                "Hidden metadata embedding",
+                "Checksum verification"
+            })
+            .build());
+    }
+
+    private ScanValidationResponse createFraudResponse(String errorMessage) {
+        return ScanValidationResponse.builder()
+            .vendorId("")
+            .vendorName("")
+            .category("")
+            .validationStatus(com.smc.svms.enums.ValidationStatus.INVALID)
+            .distance(0.0)
+            .message("❌ FRAUD DETECTED: " + errorMessage)
+            .build();
+    }
+
+    // Inner classes
+    @lombok.Data
+    @lombok.Builder
+    public static class SecurityInfo {
+        private String photoValidation;
+        private String fraudDetection;
+        private String metadataVerification;
+        private String exifValidation;
+        private String watermarkVerification;
+        private String[] features;
+    }
+}

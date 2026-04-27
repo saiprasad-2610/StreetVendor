@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Save, User, Lock, IndianRupee, Layers, Navigation } from 'lucide-react';
-import { GoogleMap, useJsApiLoader, Marker, Circle } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, Circle, Polygon } from '@react-google-maps/api';
 
 const containerStyle = {
   width: '100%',
@@ -31,9 +31,12 @@ const VendorRegister = () => {
     latitude: 17.6599,
     longitude: 75.9064,
     address: '',
-    monthlyRent: 500,
-    zoneId: ''
+    monthlyRent: 0, // Changed from 500 to 0 to ensure zone value is used
+    zoneId: '',
+    registrationMode: 'zone', // 'zone' or 'custom'
+    customPolygon: []
   });
+  const [mapType, setMapType] = useState('satellite');
 
   useEffect(() => {
     const fetchZones = async () => {
@@ -41,12 +44,21 @@ const VendorRegister = () => {
       setZonesError('');
       try {
         const response = await axios.get('/api/zones');
-        const raw = Array.isArray(response.data) ? response.data : [];
+        console.log('Raw response:', response.data);
+        const raw = Array.isArray(response.data) ? response.data : response.data?.data || [];
+        console.log('Parsed zones array:', raw);
+        // Log each zone's monthlyRent to debug
+        raw.forEach(z => {
+          console.log(`Zone ${z.name}: monthlyRent = ${z.monthlyRent}`);
+        });
         const filtered = raw.filter(z => {
           const active = z?.isActive ?? z?.active ?? true;
           const type = String(z?.zoneType ?? '').toUpperCase();
-          return Boolean(active) && type === 'ALLOWED';
+          const available = z?.isAvailable !== false; // Default to true if not set
+          console.log(`Zone ${z.name}: active=${active}, type=${type}, available=${available}`);
+          return Boolean(active) && type === 'ALLOWED' && available;
         });
+        console.log('Filtered zones:', filtered);
         setZones(filtered);
       } catch (err) {
         const status = err?.response?.status;
@@ -77,12 +89,51 @@ const VendorRegister = () => {
 
   const onMapClick = useCallback((e) => {
     pausePanUntilRef.current = Date.now() + 8000;
-    setFormData(prev => ({
-      ...prev,
-      latitude: e.latLng.lat(),
-      longitude: e.latLng.lng()
-    }));
-  }, [isLive]);
+    const clickedLat = e.latLng.lat();
+    const clickedLng = e.latLng.lng();
+    
+    // Check if clicked point is inside any polygon zone
+    let clickedZone = null;
+    for (const zone of zones) {
+      if (zone.polygonCoordinates) {
+        try {
+          const polygonPoints = JSON.parse(zone.polygonCoordinates);
+          if (isPointInPolygon({ lat: clickedLat, lng: clickedLng }, polygonPoints)) {
+            clickedZone = zone;
+            break;
+          }
+        } catch (err) {
+          console.error('Error parsing polygon coordinates:', err);
+        }
+      } else if (zone.radiusMeters) {
+        // Check if point is within circle zone
+        const zoneLat = Number(zone.latitude);
+        const zoneLng = Number(zone.longitude);
+        const distance = calculateDistance(clickedLat, clickedLng, zoneLat, zoneLng);
+        if (distance <= zone.radiusMeters) {
+          clickedZone = zone;
+          break;
+        }
+      }
+    }
+    
+    if (clickedZone) {
+      setFormData(prev => ({
+        ...prev,
+        latitude: clickedLat,
+        longitude: clickedLng,
+        zoneId: clickedZone.id.toString(),
+        monthlyRent: clickedZone.monthlyRent || prev.monthlyRent
+      }));
+      focusZone(clickedZone);
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        latitude: clickedLat,
+        longitude: clickedLng
+      }));
+    }
+  }, [isLive, zones]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -110,6 +161,36 @@ const VendorRegister = () => {
     if (r <= 200) return 17;
     if (r <= 500) return 15;
     return 14;
+  };
+
+  const calculateDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  const isPointInPolygon = (point, polygon) => {
+    const x = point.lat;
+    const y = point.lng;
+    let inside = false;
+    
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].lat;
+      const yi = polygon[i].lng;
+      const xj = polygon[j].lat;
+      const yj = polygon[j].lng;
+      
+      const intersect = ((yi > y) !== (yj > y)) &&
+        (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    
+    return inside;
   };
 
   const focusZone = (zone) => {
@@ -286,9 +367,21 @@ const VendorRegister = () => {
             <div className="space-y-1">
               <label className="text-sm font-semibold text-gray-600">Monthly Rent (₹)</label>
               <div className="relative">
-                <input name="monthlyRent" type="number" required value={formData.monthlyRent} onChange={handleChange} className="w-full pl-10 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600" placeholder="500" />
+                <input
+                  name="monthlyRent"
+                  type="number"
+                  required
+                  value={formData.monthlyRent}
+                  readOnly
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600 bg-gray-100 cursor-not-allowed"
+                  placeholder="Select a zone to see rent"
+                />
                 <IndianRupee size={16} className="absolute left-3 top-3 text-gray-400" />
+                <div className="absolute right-3 top-2 text-xs text-gray-500 bg-blue-100 px-2 py-1 rounded">
+                  Auto-filled
+                </div>
               </div>
+              <p className="text-xs text-gray-500">Rent is determined by the zone selected above</p>
             </div>
           </div>
 
@@ -334,12 +427,15 @@ const VendorRegister = () => {
                 value={formData.zoneId}
                 onChange={(e) => {
                   const zone = zones.find(z => z.id === parseInt(e.target.value));
+                  console.log('Selected zone:', zone);
+                  console.log('Zone monthlyRent:', zone?.monthlyRent);
                   if (zone) focusZone(zone);
                   setFormData(prev => ({
                     ...prev,
                     zoneId: e.target.value,
-                    latitude: zone && !isLive ? zone.latitude : prev.latitude,
-                    longitude: zone && !isLive ? zone.longitude : prev.longitude
+                    latitude: zone && !isLive ? (zone.centerLatitude || zone.latitude) : prev.latitude,
+                    longitude: zone && !isLive ? (zone.centerLongitude || zone.longitude) : prev.longitude,
+                    monthlyRent: zone?.monthlyRent || prev.monthlyRent
                   }));
                 }}
                 disabled={zonesLoading}
@@ -349,7 +445,7 @@ const VendorRegister = () => {
                 </option>
                 {zones.map(zone => (
                   <option key={zone.id} value={zone.id}>
-                    {zone.name} (Radius: {zone.radiusMeters}m)
+                    {zone.name} ({zone.polygonCoordinates ? 'Polygon' : `Radius: ${zone.radiusMeters}m`})
                   </option>
                 ))}
               </select>
@@ -372,9 +468,13 @@ const VendorRegister = () => {
                     zoom={17}
                     onClick={onMapClick}
                     onLoad={map => mapRef.current = map}
+                    mapTypeId={mapType === 'satellite' ? 'satellite' : 'roadmap'}
                     options={{
                       gestureHandling: 'greedy',
-                      mapTypeControl: false,
+                      mapTypeControl: true,
+                      mapTypeControlOptions: {
+                        mapTypeIds: ['roadmap', 'satellite', 'hybrid', 'terrain']
+                      },
                       streetViewControl: false
                     }}
                   >
@@ -404,20 +504,57 @@ const VendorRegister = () => {
             />
           ) : null}
                     
-                    {zones.map(zone => (
-                      <Circle
-                        key={zone.id}
-                        center={{ lat: Number(zone.latitude), lng: Number(zone.longitude) }}
-                        radius={zone.radiusMeters}
-                        options={{
-                          fillColor: formData.zoneId == zone.id ? '#22c55e' : '#94a3b8',
-                          fillOpacity: formData.zoneId == zone.id ? 0.2 : 0.1,
-                          strokeColor: formData.zoneId == zone.id ? '#22c55e' : '#94a3b8',
-                          strokeOpacity: 0.5,
-                          strokeWeight: formData.zoneId == zone.id ? 4 : 2,
-                        }}
-                      />
-                    ))}
+                    {zones.map(zone => {
+                      const polygonData = zone.polygonCoordinatesJson || zone.polygonCoordinates;
+                      return polygonData ? (
+                        <Polygon
+                          key={zone.id}
+                          paths={JSON.parse(polygonData)}
+                          options={{
+                            fillColor: formData.zoneId == zone.id ? '#22c55e' : '#3b82f6',
+                            fillOpacity: formData.zoneId == zone.id ? 0.4 : 0.25,
+                            strokeColor: formData.zoneId == zone.id ? '#22c55e' : '#1d4ed8',
+                            strokeOpacity: 0.8,
+                            strokeWeight: formData.zoneId == zone.id ? 5 : 3,
+                            clickable: true
+                          }}
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              zoneId: zone.id.toString(),
+                              latitude: zone.centerLatitude || zone.latitude,
+                              longitude: zone.centerLongitude || zone.longitude,
+                              monthlyRent: zone.monthlyRent || prev.monthlyRent
+                            }));
+                            focusZone(zone);
+                          }}
+                        />
+                      ) : (
+                        <Circle
+                          key={zone.id}
+                          center={{ lat: Number(zone.centerLatitude || zone.latitude), lng: Number(zone.centerLongitude || zone.longitude) }}
+                          radius={zone.radiusMeters}
+                          options={{
+                            fillColor: formData.zoneId == zone.id ? '#22c55e' : '#3b82f6',
+                            fillOpacity: formData.zoneId == zone.id ? 0.3 : 0.2,
+                            strokeColor: formData.zoneId == zone.id ? '#22c55e' : '#1d4ed8',
+                            strokeOpacity: 0.8,
+                            strokeWeight: formData.zoneId == zone.id ? 5 : 3,
+                            clickable: true
+                          }}
+                          onClick={() => {
+                            setFormData(prev => ({
+                              ...prev,
+                              zoneId: zone.id.toString(),
+                              latitude: zone.centerLatitude || zone.latitude,
+                              longitude: zone.centerLongitude || zone.longitude,
+                              monthlyRent: zone.monthlyRent || prev.monthlyRent
+                            }));
+                            focusZone(zone);
+                          }}
+                        />
+                      );
+                    })}
                   </GoogleMap>
                 ) : (
                   <div className="h-full flex items-center justify-center">Loading Maps...</div>

@@ -45,4 +45,41 @@ public class PaymentController {
     public ResponseEntity<java.util.List<com.smc.svms.entity.RentPayment>> getMyRentPayments(java.security.Principal principal) {
         return ResponseEntity.ok(paymentService.getMyRentPayments(principal.getName()));
     }
+
+    @GetMapping("/rent-payments/vendor/{vendorId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
+    public ResponseEntity<java.util.List<com.smc.svms.entity.RentPayment>> getRentPaymentsByVendor(@PathVariable Long vendorId) {
+        return ResponseEntity.ok(paymentService.getRentPaymentsByVendor(vendorId));
+    }
+
+    @GetMapping("/rent-payments/debug")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
+    public ResponseEntity<java.util.Map<String, Object>> debugRentPayments() {
+        java.util.Map<String, Object> debug = new java.util.HashMap<>();
+        java.util.List<com.smc.svms.entity.RentPayment> payments = paymentService.getAllRentPayments();
+        debug.put("count", payments.size());
+        debug.put("payments", payments);
+        return ResponseEntity.ok(debug);
+    }
+
+    @PostMapping("/rent-payments/create-test")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
+    public ResponseEntity<String> createTestRentPayment() {
+        try {
+            paymentService.createTestRentPayment();
+            return ResponseEntity.ok("Test rent payment created successfully");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Failed to create test rent payment: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/rent-payments/create-test-simple")
+    public ResponseEntity<String> createTestRentPaymentSimple() {
+        try {
+            paymentService.createTestRentPayment();
+            return ResponseEntity.ok("Test rent payment created successfully");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Failed to create test rent payment: " + e.getMessage());
+        }
+    }
 }

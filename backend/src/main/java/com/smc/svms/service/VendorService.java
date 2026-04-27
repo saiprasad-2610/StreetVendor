@@ -17,4 +17,5 @@ public interface VendorService {
     VendorDTO rejectVendor(Long id);
     VendorDTO suspendVendor(Long id);
     void deleteVendor(Long id);
+    List<VendorDTO> getVendorsByZone(Long zoneId);
 }

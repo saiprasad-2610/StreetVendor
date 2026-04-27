@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@RestController
 @RequestMapping("/api/zones")
 @RequiredArgsConstructor
 public class ZoneController {
@@ -30,17 +29,24 @@ public class ZoneController {
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
     public ResponseEntity<Zone> updateZone(@PathVariable Long id, @RequestBody Zone zoneDetails) {
+        System.out.println("Updating zone ID: " + id);
+        System.out.println("Received monthlyRent: " + zoneDetails.getMonthlyRent());
         Zone zone = zoneRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Zone not found"));
-        
+
         zone.setName(zoneDetails.getName());
         zone.setZoneType(zoneDetails.getZoneType());
         zone.setLatitude(zoneDetails.getLatitude());
         zone.setLongitude(zoneDetails.getLongitude());
         zone.setRadiusMeters(zoneDetails.getRadiusMeters());
+        zone.setMonthlyRent(zoneDetails.getMonthlyRent());
         zone.setIsActive(zoneDetails.getIsActive());
-        
-        return ResponseEntity.ok(zoneRepository.save(zone));
+
+        System.out.println("Setting monthlyRent to: " + zone.getMonthlyRent());
+        Zone saved = zoneRepository.save(zone);
+        System.out.println("Saved monthlyRent: " + saved.getMonthlyRent());
+
+        return ResponseEntity.ok(saved);
     }
 
     @DeleteMapping("/{id}")

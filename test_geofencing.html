@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Geofencing API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+        .success { color: green; }
+        .error { color: red; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Geofencing Dashboard API Test</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Get All Zones</h2>
+        <button onclick="testGetZones()">Test Get Zones</button>
+        <div id="zones-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Get Zone Capacity</h2>
+        <button onclick="testZoneCapacity()">Test Zone Capacity</button>
+        <div id="capacity-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: Find Nearest Zone</h2>
+        <button onclick="testNearestZone()">Test Nearest Zone</button>
+        <div id="nearest-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 4: Validate Location</h2>
+        <button onclick="testValidateLocation()">Test Location Validation</button>
+        <div id="validate-result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080/api';
+        
+        async function makeRequest(url, options = {}) {
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                
+                const data = await response.json();
+                return { success: response.ok, data, status: response.status };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        }
+        
+        async function testGetZones() {
+            const result = await makeRequest(`${API_BASE}/zones`);
+            const resultDiv = document.getElementById('zones-result');
+            
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div class="success">✓ Success (${result.status})</div>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="error">✗ Failed: ${result.error}</div>
+                `;
+            }
+        }
+        
+        async function testZoneCapacity() {
+            const result = await makeRequest(`${API_BASE}/zones/capacity/all`);
+            const resultDiv = document.getElementById('capacity-result');
+            
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div class="success">✓ Success (${result.status})</div>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="error">✗ Failed: ${result.error}</div>
+                `;
+            }
+        }
+        
+        async function testNearestZone() {
+            const result = await makeRequest(`${API_BASE}/zones/nearest?latitude=17.6599&longitude=75.9064`);
+            const resultDiv = document.getElementById('nearest-result');
+            
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div class="success">✓ Success (${result.status})</div>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="error">✗ Failed: ${result.error}</div>
+                `;
+            }
+        }
+        
+        async function testValidateLocation() {
+            const result = await makeRequest(`${API_BASE}/zones/validate-location`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    vendorId: 1,
+                    latitude: 17.6599,
+                    longitude: 75.9064
+                })
+            });
+            const resultDiv = document.getElementById('validate-result');
+            
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div class="success">✓ Success (${result.status})</div>
+                    <pre>${JSON.stringify(result.data, null, 2)}</pre>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="error">✗ Failed: ${result.error}</div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

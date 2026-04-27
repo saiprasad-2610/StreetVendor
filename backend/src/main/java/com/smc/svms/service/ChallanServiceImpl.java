@@ -22,9 +22,10 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ChallanServiceImpl implements ChallanService {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ChallanServiceImpl.class);
+    
     private final ChallanRepository challanRepository;
     private final VendorRepository vendorRepository;
     private final UserRepository userRepository;

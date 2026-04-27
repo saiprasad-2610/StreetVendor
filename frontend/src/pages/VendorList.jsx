@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
-import { Plus, Check, X, Search, MoreVertical, QrCode as QrIcon, Download, ExternalLink } from 'lucide-react';
+import { Plus, Check, X, Search, MoreVertical, QrCode as QrIcon, Download, ExternalLink, Eye, Trash2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const VendorList = () => {
@@ -17,11 +17,13 @@ const VendorList = () => {
 
   const fetchVendors = async () => {
     try {
-      const response = await axios.get('/api/vendors');
-      if (Array.isArray(response.data)) {
-        setVendors(response.data);
+      const response = await axios.get('http://localhost:8080/api/vendors');
+      // Handle wrapped response structure
+      const vendorsData = response.data?.data || response.data;
+      if (Array.isArray(vendorsData)) {
+        setVendors(vendorsData);
       } else {
-        console.error("Expected array but got:", response.data);
+        console.error("Expected array but got:", vendorsData);
         setVendors([]);
       }
     } catch (err) {
@@ -35,7 +37,7 @@ const VendorList = () => {
   const handleStatusChange = async (id, action) => {
     try {
       // Backend uses PUT /api/vendors/{id}/approve and PUT /api/vendors/{id}/reject
-      const endpoint = `/api/vendors/${id}/${action}`;
+      const endpoint = `http://localhost:8080/api/vendors/${id}/${action}`;
       await axios.put(endpoint);
       fetchVendors();
     } catch (err) {
@@ -46,12 +48,14 @@ const VendorList = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm("Are you sure you want to delete this vendor?")) {
+    if (window.confirm("Are you sure you want to delete this vendor? This action cannot be undone.")) {
       try {
         await axios.delete(`/api/vendors/${id}`);
         fetchVendors();
       } catch (err) {
-        alert("Failed to delete vendor");
+        console.error("Failed to delete vendor", err);
+        const message = err.response?.data?.message || "Failed to delete vendor";
+        alert(message);
       }
     }
   };
@@ -69,7 +73,7 @@ const VendorList = () => {
           <p className="text-gray-500 text-sm">Manage and monitor all registered vendors in Solapur</p>
         </div>
         {user.role === 'ADMIN' && (
-          <Link to="/vendors/add" className="bg-smc-blue text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2 hover:bg-blue-800 transition shadow-md">
+          <Link to="/vendors/add" className="bg-smc-blue text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-blue-800 transition shadow-md w-full sm:w-auto">
             <Plus size={18} /> Register Vendor
           </Link>
         )}
@@ -87,7 +91,8 @@ const VendorList = () => {
           />
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider">
               <tr>
@@ -115,7 +120,7 @@ const VendorList = () => {
                           {vendor.qrCodeUrl ? (
                             <img src={vendor.qrCodeUrl} alt="QR" className="w-full h-full object-cover" />
                           ) : (
-                            vendor.name.charAt(0)
+                            vendor.status === 'APPROVED' ? 'QR' : vendor.name.charAt(0)
                           )}
                         </div>
                         <div>
@@ -150,6 +155,13 @@ const VendorList = () => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2">
+                        <Link 
+                          to={`/vendors/${vendor.id}`}
+                          className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                          title="View Details"
+                        >
+                          <Eye size={18} />
+                        </Link>
                         {user.role === 'ADMIN' && vendor.status === 'PENDING' && (
                           <>
                             <button onClick={() => handleStatusChange(vendor.id, 'approve')} className="p-1 text-green-600 hover:bg-green-50 rounded" title="Approve">
@@ -163,11 +175,20 @@ const VendorList = () => {
                         <button 
                           onClick={() => vendor.qrCodeUrl && setSelectedVendor(vendor)}
                           className={`p-1 rounded ${vendor.qrCodeUrl ? 'text-smc-blue hover:bg-blue-50' : 'text-gray-300 cursor-not-allowed'}`}
-                          title={vendor.qrCodeUrl ? "View QR Code" : "QR Code not generated"}
+                          title={vendor.qrCodeUrl ? "View QR Code" : vendor.status === 'APPROVED' ? "QR Code will be generated on approval" : "QR Code - Approve vendor to generate"}
                           disabled={!vendor.qrCodeUrl}
                         >
                           <QrIcon size={18} />
                         </button>
+                        {user.role === 'ADMIN' && (
+                          <button 
+                            onClick={() => handleDelete(vendor.id)}
+                            className="p-1 text-red-600 hover:bg-red-50 rounded"
+                            title="Delete Vendor"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        )}
                         <button className="p-1 text-gray-400 hover:bg-gray-100 rounded">
                           <MoreVertical size={18} />
                         </button>
@@ -178,6 +199,91 @@ const VendorList = () => {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card View */}
+        <div className="md:hidden p-4 space-y-4">
+          {loading ? (
+            <div className="text-center py-8">Loading vendors...</div>
+          ) : filteredVendors.length === 0 ? (
+            <div className="text-center py-8">No vendors found</div>
+          ) : (
+            filteredVendors.map(vendor => (
+              <div key={vendor.id} className="bg-gray-50 rounded-xl p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div 
+                    onClick={() => vendor.qrCodeUrl && setSelectedVendor(vendor)}
+                    className={`h-12 w-12 rounded-lg flex items-center justify-center overflow-hidden border flex-shrink-0 ${vendor.qrCodeUrl ? 'cursor-pointer border-blue-200 bg-white' : 'bg-blue-100 text-smc-blue font-bold'}`}
+                  >
+                    {vendor.qrCodeUrl ? (
+                      <img src={vendor.qrCodeUrl} alt="QR" className="w-full h-full object-cover" />
+                    ) : (
+                      vendor.status === 'APPROVED' ? 'QR' : vendor.name.charAt(0)
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800 truncate">{vendor.name}</p>
+                    <p className="text-xs text-gray-500">{vendor.vendorId}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full font-semibold flex-shrink-0 ${
+                    vendor.status === 'APPROVED' ? 'bg-green-100 text-green-700' :
+                    vendor.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-red-100 text-red-700'
+                  }`}>
+                    {vendor.status}
+                  </span>
+                </div>
+                
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full uppercase">
+                    {vendor.category}
+                  </span>
+                  <span className="text-xs font-bold text-gray-700">
+                    ₹{vendor.monthlyRent || 0}/month
+                  </span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                    vendor.isRentPaidCurrentMonth ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {vendor.isRentPaidCurrentMonth ? 'Paid' : 'Unpaid'}
+                  </span>
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-gray-200">
+                  <Link 
+                    to={`/vendors/${vendor.id}`}
+                    className="flex-1 flex items-center justify-center gap-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+                  >
+                    <Eye size={16} /> View
+                  </Link>
+                  {user.role === 'ADMIN' && vendor.status === 'PENDING' && (
+                    <>
+                      <button onClick={() => handleStatusChange(vendor.id, 'approve')} className="flex-1 flex items-center justify-center gap-1 bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition">
+                        <Check size={16} /> Approve
+                      </button>
+                      <button onClick={() => handleStatusChange(vendor.id, 'reject')} className="flex-1 flex items-center justify-center gap-1 bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition">
+                        <X size={16} /> Reject
+                      </button>
+                    </>
+                  )}
+                  <button 
+                    onClick={() => vendor.qrCodeUrl && setSelectedVendor(vendor)}
+                    disabled={!vendor.qrCodeUrl}
+                    className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition ${vendor.qrCodeUrl ? 'bg-smc-blue text-white hover:bg-blue-800' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                  >
+                    <QrIcon size={16} /> QR
+                  </button>
+                  {user.role === 'ADMIN' && (
+                    <button 
+                      onClick={() => handleDelete(vendor.id)}
+                      className="flex-1 flex items-center justify-center gap-1 bg-red-100 text-red-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-red-200 transition"
+                    >
+                      <Trash2 size={16} /> Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -197,7 +303,7 @@ const VendorList = () => {
                 <img 
                   src={selectedVendor.qrCodeUrl} 
                   alt="QR Code" 
-                  className="w-64 h-64 object-contain shadow-sm"
+                  className="w-48 h-48 sm:w-64 sm:h-64 object-contain shadow-sm"
                   onError={(e) => {
                     e.target.src = 'https://via.placeholder.com/300?text=QR+Not+Found';
                   }}

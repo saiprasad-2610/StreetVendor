@@ -25,6 +25,8 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 @Slf4j
 public class PaymentService {
+    
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PaymentService.class);
 
     private final ChallanRepository challanRepository;
     private final com.smc.svms.repository.VendorRepository vendorRepository;
@@ -161,8 +163,17 @@ public class PaymentService {
         }
     }
 
+    @Transactional(readOnly = true)
     public java.util.List<RentPayment> getAllRentPayments() {
-        return rentPaymentRepository.findAll();
+        java.util.List<RentPayment> payments = rentPaymentRepository.findAll();
+        // Initialize vendor relationships to avoid lazy loading issues
+        payments.forEach(payment -> {
+            if (payment.getVendor() != null) {
+                payment.getVendor().getName(); // Initialize vendor data
+                payment.getVendor().getVendorId(); // Initialize vendor ID
+            }
+        });
+        return payments;
     }
 
     public java.util.List<RentPayment> getMyRentPayments(String username) {
@@ -170,5 +181,50 @@ public class PaymentService {
             vendorRepository.findByCreatedByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Vendor not found")).getVendorId()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.List<RentPayment> getRentPaymentsByVendor(Long vendorId) {
+        java.util.List<RentPayment> payments = rentPaymentRepository.findByVendorId(vendorId);
+        // Initialize vendor relationships to avoid lazy loading issues
+        payments.forEach(payment -> {
+            if (payment.getVendor() != null) {
+                payment.getVendor().getName(); // Initialize vendor data
+                payment.getVendor().getVendorId(); // Initialize vendor ID
+            }
+        });
+        return payments;
+    }
+
+    @Transactional
+    public void createTestRentPayment() {
+        // Find a vendor to associate with the test payment
+        com.smc.svms.entity.Vendor vendor = vendorRepository.findAll().stream()
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("No vendors found in database"));
+
+        // Create test rent payment
+        RentPayment testPayment = RentPayment.builder()
+            .vendor(vendor)
+            .amount(new java.math.BigDecimal("2000.00"))
+            .paymentMonth(java.time.LocalDate.now().getMonthValue())
+            .paymentYear(java.time.LocalDate.now().getYear())
+            .razorpayOrderId("test_order_" + System.currentTimeMillis())
+            .razorpayPaymentId("test_payment_" + System.currentTimeMillis())
+            .paidAt(java.time.LocalDateTime.now())
+            .build();
+
+        rentPaymentRepository.save(testPayment);
+        log.info("Test rent payment created for vendor: {}", vendor.getVendorId());
+    }
+
+    @Transactional
+    public void markChallanAsPaid(Long challanId) {
+        Challan challan = challanRepository.findById(challanId)
+                .orElseThrow(() -> new RuntimeException("Challan not found"));
+        challan.setStatus(com.smc.svms.enums.ChallanStatus.PAID);
+        challan.setPaidAt(java.time.LocalDateTime.now());
+        challanRepository.save(challan);
+        log.info("Challan marked as paid: {}", challan.getChallanNumber());
     }
 }

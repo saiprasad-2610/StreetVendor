@@ -6,7 +6,7 @@ import { format } from 'date-fns';
 const RentManagement = () => {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1);
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
 
@@ -17,19 +17,27 @@ const RentManagement = () => {
   const fetchPayments = async () => {
     try {
       const response = await axios.get('/api/payments/rent-payments');
-      setPayments(response.data);
+      // Handle direct response structure (backend returns array directly)
+      setPayments(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.error("Failed to fetch rent payments", err);
+      // Set empty array on error to prevent blank page
+      setPayments([]);
     } finally {
       setLoading(false);
     }
   };
 
   const filteredPayments = payments.filter(p => 
-    (p.vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-     p.vendor.vendorId.toLowerCase().includes(searchTerm.toLowerCase())) &&
-    (filterMonth === '' || p.paymentMonth === parseInt(filterMonth)) &&
-    (filterYear === '' || p.paymentYear === parseInt(filterYear))
+    p && (
+      (filterMonth === '' || p.paymentMonth === parseInt(filterMonth)) &&
+      (filterYear === '' || p.paymentYear === parseInt(filterYear)) &&
+      (searchTerm === '' || 
+        (p.vendor?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+         p.vendor?.vendorId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+         `Vendor ${p.vendorId}`.toLowerCase().includes(searchTerm.toLowerCase()))
+      )
+    )
   );
 
   const months = [
@@ -109,29 +117,29 @@ const RentManagement = () => {
                 <tr><td colSpan="6" className="text-center py-10 text-gray-500">No rent payments found for the selected filters.</td></tr>
               ) : (
                 filteredPayments.map(payment => (
-                  <tr key={payment.id} className="hover:bg-gray-50 transition">
+                  <tr key={payment.id || Math.random()} className="hover:bg-gray-50 transition">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                          {payment.vendor.name.charAt(0)}
+                          {payment.vendor?.name?.charAt(0) || 'V'}
                         </div>
                         <div>
-                          <p className="font-bold text-gray-900">{payment.vendor.name}</p>
-                          <p className="text-[10px] text-gray-500">{payment.vendor.vendorId}</p>
+                          <p className="font-bold text-gray-900">{payment.vendor?.name || `Vendor ${payment.vendorId}`}</p>
+                          <p className="text-[10px] text-gray-500">{payment.vendor?.vendorId || `ID: ${payment.vendorId}`}</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-6 py-4 font-medium">
-                      {months.find(m => m.value === payment.paymentMonth)?.label} {payment.paymentYear}
+                      {months.find(m => m.value === payment.paymentMonth)?.label || 'Unknown'} {payment.paymentYear || 'N/A'}
                     </td>
                     <td className="px-6 py-4 font-bold text-gray-800">
-                      ₹{payment.amount}
+                      ₹{payment.amount || '0'}
                     </td>
                     <td className="px-6 py-4 font-mono text-xs text-gray-500">
-                      {payment.razorpayPaymentId}
+                      {payment.razorpayPaymentId || 'N/A'}
                     </td>
                     <td className="px-6 py-4 text-gray-600">
-                      {format(new Date(payment.paidAt), 'dd MMM yyyy HH:mm')}
+                      {payment.paidAt ? format(new Date(payment.paidAt), 'dd MMM yyyy HH:mm') : 'N/A'}
                     </td>
                     <td className="px-6 py-4">
                       <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-[10px] font-bold uppercase flex items-center gap-1 w-fit">

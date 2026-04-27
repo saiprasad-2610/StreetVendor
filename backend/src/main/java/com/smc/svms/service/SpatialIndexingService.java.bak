@@ -1,0 +1,427 @@
+package com.smc.svms.service;
+
+import com.smc.svms.entity.Zone;
+import com.smc.svms.entity.Vendor;
+import com.smc.svms.repository.ZoneRepository;
+import com.smc.svms.repository.VendorRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Spatial indexing service for high-performance geofencing queries
+ * Uses grid-based spatial indexing for O(1) zone lookups
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class SpatialIndexingService {
+
+    private final ZoneRepository zoneRepository;
+    private final VendorRepository vendorRepository;
+    
+    // Grid size in degrees (approximately 1km x 1km)
+    private static final double GRID_SIZE = 0.009; // ~1km at equator
+    
+    // Spatial grid cache
+    private final Map<String, List<Zone>> zoneGrid = new ConcurrentHashMap<>();
+    private final Map<String, List<Vendor>> vendorGrid = new ConcurrentHashMap<>();
+    
+    // Bounding box cache for zones
+    private final Map<Long, BoundingBox> zoneBounds = new ConcurrentHashMap<>();
+    
+    /**
+     * Initialize spatial index for zones
+     */
+    public void initializeZoneIndex() {
+        log.info("Initializing spatial index for zones");
+        zoneGrid.clear();
+        zoneBounds.clear();
+        
+        List<Zone> allZones = zoneRepository.findAllActiveZones();
+        
+        for (Zone zone : allZones) {
+            BoundingBox bounds = calculateZoneBounds(zone);
+            zoneBounds.put(zone.getId(), bounds);
+            
+            // Add zone to all grid cells it covers
+            List<GridCell> cells = getGridCellsForBounds(bounds);
+            for (GridCell cell : cells) {
+                String key = getGridKey(cell.lat, cell.lon);
+                zoneGrid.computeIfAbsent(key, k -> new ArrayList<>()).add(zone);
+            }
+        }
+        
+        log.info("Spatial index initialized for {} zones covering {} grid cells", 
+                allZones.size(), zoneGrid.size());
+    }
+    
+    /**
+     * Initialize spatial index for vendors
+     */
+    public void initializeVendorIndex() {
+        log.info("Initializing spatial index for vendors");
+        vendorGrid.clear();
+        
+        List<Vendor> allVendors = vendorRepository.findByStatus("APPROVED");
+        
+        for (Vendor vendor : allVendors) {
+            if (vendor.getLocation() != null) {
+                double lat = vendor.getLocation().getLatitude().doubleValue();
+                double lon = vendor.getLocation().getLongitude().doubleValue();
+                
+                String key = getGridKey(lat, lon);
+                vendorGrid.computeIfAbsent(key, k -> new ArrayList<>()).add(vendor);
+            }
+        }
+        
+        log.info("Spatial index initialized for {} vendors", allVendors.size());
+    }
+    
+    /**
+     * Find zones near a point using spatial index
+     */
+    @Cacheable(value = "nearbyZones", key = "#latitude + ',' + #longitude + ',' + #radius")
+    public List<Zone> findZonesNearPoint(double latitude, double longitude, double radius) {
+        List<Zone> nearbyZones = new ArrayList<>();
+        
+        // Get grid cells within radius
+        List<GridCell> cells = getGridCellsInRadius(latitude, longitude, radius);
+        
+        for (GridCell cell : cells) {
+            String key = getGridKey(cell.lat, cell.lon);
+            List<Zone> cellZones = zoneGrid.get(key);
+            
+            if (cellZones != null) {
+                for (Zone zone : cellZones) {
+                    if (!nearbyZones.contains(zone)) {
+                        // Double-check with actual distance calculation
+                        double distance = calculateDistanceToZone(latitude, longitude, zone);
+                        if (distance <= radius) {
+                            nearbyZones.add(zone);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return nearbyZones;
+    }
+    
+    /**
+     * Find vendors near a point using spatial index
+     */
+    @Cacheable(value = "nearbyVendors", key = "#latitude + ',' + #longitude + ',' + #radius")
+    public List<Vendor> findVendorsNearPoint(double latitude, double longitude, double radius) {
+        List<Vendor> nearbyVendors = new ArrayList<>();
+        
+        // Get grid cells within radius
+        List<GridCell> cells = getGridCellsInRadius(latitude, longitude, radius);
+        
+        for (GridCell cell : cells) {
+            String key = getGridKey(cell.lat, cell.lon);
+            List<Vendor> cellVendors = vendorGrid.get(key);
+            
+            if (cellVendors != null) {
+                for (Vendor vendor : cellVendors) {
+                    if (!nearbyVendors.contains(vendor)) {
+                        // Double-check with actual distance calculation
+                        double distance = calculateHaversineDistance(
+                            latitude, longitude,
+                            vendor.getLocation().getLatitude().doubleValue(),
+                            vendor.getLocation().getLongitude().doubleValue()
+                        );
+                        if (distance <= radius) {
+                            nearbyVendors.add(vendor);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return nearbyVendors;
+    }
+    
+    /**
+     * Check if point is within any zone using spatial index
+     */
+    public Zone findZoneContainingPoint(double latitude, double longitude) {
+        // Get the grid cell for the point
+        String key = getGridKey(latitude, longitude);
+        List<Zone> cellZones = zoneGrid.get(key);
+        
+        if (cellZones != null) {
+            for (Zone zone : cellZones) {
+                if (isPointInZone(latitude, longitude, zone)) {
+                    return zone;
+                }
+            }
+        }
+        
+        // Check neighboring cells (point might be near boundary)
+        List<GridCell> neighbors = getNeighboringCells(latitude, longitude);
+        for (GridCell neighbor : neighbors) {
+            String neighborKey = getGridKey(neighbor.lat, neighbor.lon);
+            List<Zone> neighborZones = zoneGrid.get(neighborKey);
+            
+            if (neighborZones != null) {
+                for (Zone zone : neighborZones) {
+                    if (isPointInZone(latitude, longitude, zone)) {
+                        return zone;
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Get zone density information for an area
+     */
+    public ZoneDensityInfo getZoneDensity(double latitude, double longitude, double radius) {
+        List<Zone> nearbyZones = findZonesNearPoint(latitude, longitude, radius);
+        List<Vendor> nearbyVendors = findVendorsNearPoint(latitude, longitude, radius);
+        
+        // Calculate density metrics
+        double area = Math.PI * radius * radius / 1000000.0; // Convert to km²
+        
+        int totalCapacity = nearbyZones.stream()
+            .filter(zone -> zone.getMaxVendors() != null)
+            .mapToInt(Zone::getMaxVendors)
+            .sum();
+        
+        double utilizationRate = totalCapacity > 0 ? (double) nearbyVendors.size() / totalCapacity : 0.0;
+        
+        return ZoneDensityInfo.builder()
+            .centerLatitude(latitude)
+            .centerLongitude(longitude)
+            .radius(radius)
+            .areaKm2(area)
+            .zoneCount(nearbyZones.size())
+            .vendorCount(nearbyVendors.size())
+            .totalCapacity(totalCapacity)
+            .utilizationRate(utilizationRate)
+            .isOvercrowded(utilizationRate > 0.9)
+            .build();
+    }
+    
+    /**
+     * Rebuild spatial index for updated data
+     */
+    public void rebuildIndex() {
+        log.info("Rebuilding spatial index");
+        initializeZoneIndex();
+        initializeVendorIndex();
+    }
+    
+    /**
+     * Get spatial index statistics
+     */
+    public SpatialIndexStats getIndexStats() {
+        return SpatialIndexStats.builder()
+            .zoneGridCells(zoneGrid.size())
+            .vendorGridCells(vendorGrid.size())
+            .totalZones(zoneGrid.values().stream().mapToInt(List::size).sum())
+            .totalVendors(vendorGrid.values().stream().mapToInt(List::size).sum())
+            .averageZonesPerCell(zoneGrid.isEmpty() ? 0 : 
+                zoneGrid.values().stream().mapToInt(List::size).average().orElse(0))
+            .averageVendorsPerCell(vendorGrid.isEmpty() ? 0 :
+                vendorGrid.values().stream().mapToInt(List::size).average().orElse(0))
+            .build();
+    }
+    
+    // Helper methods
+    
+    private BoundingBox calculateZoneBounds(Zone zone) {
+        if (zone.hasPolygon()) {
+            return calculatePolygonBounds(zone.getPolygonCoordinates());
+        } else {
+            // For circular zones, calculate bounds from radius
+            double lat = zone.getLatitude().doubleValue();
+            double lon = zone.getLongitude().doubleValue();
+            double radius = zone.getRadiusMeters();
+            
+            // Convert radius to degrees
+            double latDelta = radius / 111320.0; // meters to degrees latitude
+            double lonDelta = radius / (111320.0 * Math.cos(Math.toRadians(lat))); // meters to degrees longitude
+            
+            return BoundingBox.builder()
+                .minLat(lat - latDelta)
+                .maxLat(lat + latDelta)
+                .minLon(lon - lonDelta)
+                .maxLon(lon + lonDelta)
+                .build();
+        }
+    }
+    
+    private BoundingBox calculatePolygonBounds(String polygonJson) {
+        // Simplified polygon bounds calculation
+        // In production, this would parse the JSON and find actual min/max
+        return BoundingBox.builder()
+            .minLat(0.0)
+            .maxLat(0.0)
+            .minLon(0.0)
+            .maxLon(0.0)
+            .build();
+    }
+    
+    private List<GridCell> getGridCellsForBounds(BoundingBox bounds) {
+        List<GridCell> cells = new ArrayList<>();
+        
+        int minLatGrid = (int) Math.floor(bounds.minLat / GRID_SIZE);
+        int maxLatGrid = (int) Math.floor(bounds.maxLat / GRID_SIZE);
+        int minLonGrid = (int) Math.floor(bounds.minLon / GRID_SIZE);
+        int maxLonGrid = (int) Math.floor(bounds.maxLon / GRID_SIZE);
+        
+        for (int latGrid = minLatGrid; latGrid <= maxLatGrid; latGrid++) {
+            for (int lonGrid = minLonGrid; lonGrid <= maxLonGrid; lonGrid++) {
+                cells.add(new GridCell(latGrid * GRID_SIZE, lonGrid * GRID_SIZE));
+            }
+        }
+        
+        return cells;
+    }
+    
+    private List<GridCell> getGridCellsInRadius(double latitude, double longitude, double radius) {
+        List<GridCell> cells = new ArrayList<>();
+        
+        // Convert radius to degrees
+        double latDelta = radius / 111320.0;
+        double lonDelta = radius / (111320.0 * Math.cos(Math.toRadians(latitude)));
+        
+        int minLatGrid = (int) Math.floor((latitude - latDelta) / GRID_SIZE);
+        int maxLatGrid = (int) Math.floor((latitude + latDelta) / GRID_SIZE);
+        int minLonGrid = (int) Math.floor((longitude - lonDelta) / GRID_SIZE);
+        int maxLonGrid = (int) Math.floor((longitude + lonDelta) / GRID_SIZE);
+        
+        for (int latGrid = minLatGrid; latGrid <= maxLatGrid; latGrid++) {
+            for (int lonGrid = minLonGrid; lonGrid <= maxLonGrid; lonGrid++) {
+                cells.add(new GridCell(latGrid * GRID_SIZE, lonGrid * GRID_SIZE));
+            }
+        }
+        
+        return cells;
+    }
+    
+    private List<GridCell> getNeighboringCells(double latitude, double longitude) {
+        List<GridCell> neighbors = new ArrayList<>();
+        
+        int latGrid = (int) Math.floor(latitude / GRID_SIZE);
+        int lonGrid = (int) Math.floor(longitude / GRID_SIZE);
+        
+        // Add 3x3 grid around the point
+        for (int dLat = -1; dLat <= 1; dLat++) {
+            for (int dLon = -1; dLon <= 1; dLon++) {
+                if (dLat != 0 || dLon != 0) {
+                    neighbors.add(new GridCell((latGrid + dLat) * GRID_SIZE, (lonGrid + dLon) * GRID_SIZE));
+                }
+            }
+        }
+        
+        return neighbors;
+    }
+    
+    private String getGridKey(double latitude, double longitude) {
+        int latGrid = (int) Math.floor(latitude / GRID_SIZE);
+        int lonGrid = (int) Math.floor(longitude / GRID_SIZE);
+        return latGrid + "," + lonGrid;
+    }
+    
+    private boolean isPointInZone(double latitude, double longitude, Zone zone) {
+        if (zone.hasPolygon()) {
+            // Use polygon validation
+            return isPointInPolygon(latitude, longitude, zone.getPolygonCoordinates());
+        } else if (zone.getRadiusMeters() != null) {
+            // Use circle validation
+            double distance = calculateHaversineDistance(
+                latitude, longitude,
+                zone.getLatitude().doubleValue(),
+                zone.getLongitude().doubleValue()
+            );
+            return distance <= zone.getRadiusMeters();
+        }
+        return false;
+    }
+    
+    private boolean isPointInPolygon(double latitude, double longitude, String polygonJson) {
+        // Simplified polygon check - would use full implementation in production
+        return false;
+    }
+    
+    private double calculateDistanceToZone(double latitude, double longitude, Zone zone) {
+        if (zone.hasPolygon()) {
+            // Calculate distance to polygon boundary
+            return 0.0; // Simplified
+        } else {
+            return calculateHaversineDistance(
+                latitude, longitude,
+                zone.getLatitude().doubleValue(),
+                zone.getLongitude().doubleValue()
+            );
+        }
+    }
+    
+    private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                   Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                   Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        
+        return 6371000 * c; // Distance in meters
+    }
+    
+    // Helper classes
+    
+    private static class GridCell {
+        final double lat;
+        final double lon;
+        
+        GridCell(double lat, double lon) {
+            this.lat = lat;
+            this.lon = lon;
+        }
+    }
+    
+    @lombok.Data
+    @lombok.Builder
+    public static class BoundingBox {
+        private double minLat;
+        private double maxLat;
+        private double minLon;
+        private double maxLon;
+    }
+    
+    @lombok.Data
+    @lombok.Builder
+    public static class ZoneDensityInfo {
+        private double centerLatitude;
+        private double centerLongitude;
+        private double radius;
+        private double areaKm2;
+        private int zoneCount;
+        private int vendorCount;
+        private int totalCapacity;
+        private double utilizationRate;
+        private boolean isOvercrowded;
+    }
+    
+    @lombok.Data
+    @lombok.Builder
+    public static class SpatialIndexStats {
+        private int zoneGridCells;
+        private int vendorGridCells;
+        private int totalZones;
+        private int totalVendors;
+        private double averageZonesPerCell;
+        private double averageVendorsPerCell;
+    }
+}

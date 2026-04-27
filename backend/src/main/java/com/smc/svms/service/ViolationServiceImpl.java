@@ -1,18 +1,20 @@
 package com.smc.svms.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.beans.factory.annotation.Value;
 import com.smc.svms.dto.ViolationRequest;
 import com.smc.svms.entity.User;
 import com.smc.svms.entity.Vendor;
 import com.smc.svms.entity.Violation;
+import com.smc.svms.entity.ViolationType;
+import com.smc.svms.entity.CitizenReport;
 import com.smc.svms.enums.ValidationStatus;
 import com.smc.svms.repository.UserRepository;
 import com.smc.svms.repository.VendorRepository;
 import com.smc.svms.repository.ViolationRepository;
 import com.smc.svms.util.GeoUtils;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -22,17 +24,26 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.ArrayList;
 
 @Service
-@RequiredArgsConstructor
-@Slf4j
 public class ViolationServiceImpl implements ViolationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ViolationServiceImpl.class);
 
     private final ViolationRepository violationRepository;
     private final VendorRepository vendorRepository;
     private final UserRepository userRepository;
     private final ChallanService challanService;
     private final FileStorageService fileStorageService;
+
+    public ViolationServiceImpl(ViolationRepository violationRepository, VendorRepository vendorRepository, UserRepository userRepository, ChallanService challanService, FileStorageService fileStorageService) {
+        this.violationRepository = violationRepository;
+        this.vendorRepository = vendorRepository;
+        this.userRepository = userRepository;
+        this.challanService = challanService;
+        this.fileStorageService = fileStorageService;
+    }
 
     @Value("${app.base-url}")
     private String baseUrl;
@@ -102,5 +113,52 @@ public class ViolationServiceImpl implements ViolationService {
     @Override
     public List<Violation> getViolationsByVendorId(String vendorId) {
         return violationRepository.findByVendorVendorId(vendorId);
+    }
+
+    @Override
+    public List<Violation> getViolationsByType(ViolationType violationType) {
+        return violationRepository.findByViolationType(violationType);
+    }
+
+    @Override
+    public List<Violation> getAutoDetectedViolations() {
+        return violationRepository.findByDetectionMethod(com.smc.svms.entity.DetectionMethod.AUTO_DETECTED);
+    }
+
+    @Override
+    public Violation createManualViolation(ViolationRequest request) {
+        // Implementation for manual violation creation
+        Violation violation = Violation.builder()
+                .vendor(vendorRepository.findByVendorId(request.getVendorId())
+                        .orElseThrow(() -> new RuntimeException("Vendor not found")))
+                .reporterName(request.getReporterName())
+                .reporterPhone(request.getReporterPhone())
+                .description(request.getDescription())
+                .capturedAt(LocalDateTime.now())
+                .validationStatus(ValidationStatus.PENDING)
+                .build();
+        
+        return violationRepository.save(violation);
+    }
+
+    @Override
+    public Violation createViolationFromCitizenReport(CitizenReport report) {
+        // Implementation for creating violation from citizen report
+        Violation violation = Violation.builder()
+                .vendor(vendorRepository.findByVendorId(report.getVendor().getVendorId())
+                        .orElseThrow(() -> new RuntimeException("Vendor not found")))
+                .reporterName(report.getReporterName())
+                .reporterPhone(report.getReporterPhone())
+                .description(report.getDescription())
+                .capturedAt(report.getCreatedAt())
+                .validationStatus(ValidationStatus.PENDING)
+                .build();
+        
+        return violationRepository.save(violation);
+    }
+    
+    @Override
+    public List<Violation> saveAll(List<Violation> violations) {
+        return violationRepository.saveAll(violations);
     }
 }

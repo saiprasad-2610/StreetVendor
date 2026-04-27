@@ -46,4 +46,91 @@ public class RentPayment {
     @CreationTimestamp
     @Column(name = "paid_at", updatable = false)
     private LocalDateTime paidAt;
+    
+    // Getters and Setters
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    
+    public Vendor getVendor() { return vendor; }
+    public void setVendor(Vendor vendor) { this.vendor = vendor; }
+    
+    public BigDecimal getAmount() { return amount; }
+    public void setAmount(BigDecimal amount) { this.amount = amount; }
+    
+    public Integer getPaymentMonth() { return paymentMonth; }
+    public void setPaymentMonth(Integer paymentMonth) { this.paymentMonth = paymentMonth; }
+    
+    public Integer getPaymentYear() { return paymentYear; }
+    public void setPaymentYear(Integer paymentYear) { this.paymentYear = paymentYear; }
+    
+    public String getRazorpayOrderId() { return razorpayOrderId; }
+    public void setRazorpayOrderId(String razorpayOrderId) { this.razorpayOrderId = razorpayOrderId; }
+    
+    public String getRazorpayPaymentId() { return razorpayPaymentId; }
+    public void setRazorpayPaymentId(String razorpayPaymentId) { this.razorpayPaymentId = razorpayPaymentId; }
+    
+    public LocalDateTime getPaidAt() { return paidAt; }
+    public void setPaidAt(LocalDateTime paidAt) { this.paidAt = paidAt; }
+    
+    // Static builder method
+    public static RentPaymentBuilder builder() {
+        return new RentPaymentBuilder();
+    }
+    
+    public static class RentPaymentBuilder {
+        private Vendor vendor;
+        private BigDecimal amount;
+        private Integer paymentMonth;
+        private Integer paymentYear;
+        private String razorpayOrderId;
+        private String razorpayPaymentId;
+        private LocalDateTime paidAt;
+        
+        public RentPaymentBuilder vendor(Vendor vendor) {
+            this.vendor = vendor;
+            return this;
+        }
+        
+        public RentPaymentBuilder amount(BigDecimal amount) {
+            this.amount = amount;
+            return this;
+        }
+        
+        public RentPaymentBuilder paymentMonth(Integer paymentMonth) {
+            this.paymentMonth = paymentMonth;
+            return this;
+        }
+        
+        public RentPaymentBuilder paymentYear(Integer paymentYear) {
+            this.paymentYear = paymentYear;
+            return this;
+        }
+        
+        public RentPaymentBuilder razorpayOrderId(String razorpayOrderId) {
+            this.razorpayOrderId = razorpayOrderId;
+            return this;
+        }
+        
+        public RentPaymentBuilder razorpayPaymentId(String razorpayPaymentId) {
+            this.razorpayPaymentId = razorpayPaymentId;
+            return this;
+        }
+        
+        public RentPaymentBuilder paidAt(LocalDateTime paidAt) {
+            this.paidAt = paidAt;
+            return this;
+        }
+        
+        public RentPayment build() {
+            RentPayment payment = new RentPayment();
+            payment.vendor = this.vendor;
+            payment.amount = this.amount;
+            payment.paymentMonth = this.paymentMonth;
+            payment.paymentYear = this.paymentYear;
+            payment.razorpayOrderId = this.razorpayOrderId;
+            payment.razorpayPaymentId = this.razorpayPaymentId;
+            payment.paidAt = this.paidAt;
+            return payment;
+        }
+    }
 }

@@ -11,9 +11,10 @@ import javax.sql.DataSource;
 
 @Configuration
 @RequiredArgsConstructor
-@Slf4j
 public class DataInitializer {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(DataInitializer.class);
+    
     private final UserService userService;
 
     @Bean

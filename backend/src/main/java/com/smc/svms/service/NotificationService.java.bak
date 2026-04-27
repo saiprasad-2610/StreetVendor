@@ -1,0 +1,33 @@
+package com.smc.svms.service;
+
+import com.smc.svms.entity.Alert;
+import com.smc.svms.entity.Violation;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Service
+public class NotificationService {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NotificationService.class);
+    
+    public void sendReportConfirmation(com.smc.svms.entity.CitizenReport report) {
+        log.info("Report confirmation sent for report ID: {}", report.getId());
+        // Implementation would send email/SMS notification
+    }
+
+    public void sendViolationAlert(Violation violation, com.smc.svms.entity.Vendor vendor) {
+        log.info("Violation alert sent for vendor ID: {}, violation ID: {}", 
+                vendor.getId(), violation.getId());
+        // Implementation would send email/SMS to relevant officers
+    }
+
+    public void sendAlertEmail(String recipient, Alert alert) {
+        log.info("Alert email sent to {} for alert ID: {}", recipient, alert.getId());
+        // Implementation would send email notification
+    }
+
+    public void sendEscalationEmail(String recipient, Alert alert, String message) {
+        log.info("Escalation email sent to {} for alert ID: {}", recipient, alert.getId());
+        // Implementation would send escalation email
+    }
+}

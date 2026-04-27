@@ -10,4 +10,12 @@ public class PaymentVerificationRequest {
     private Long challanId;
     private Long vendorId;
     private Boolean isRent;
+    
+    // Explicit getters for compilation
+    public String getRazorpayOrderId() { return razorpayOrderId; }
+    public String getRazorpayPaymentId() { return razorpayPaymentId; }
+    public String getRazorpaySignature() { return razorpaySignature; }
+    public Boolean getIsRent() { return isRent; }
+    public Long getVendorId() { return vendorId; }
+    public Long getChallanId() { return challanId; }
 }

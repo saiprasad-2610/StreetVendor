@@ -1,0 +1,58 @@
+{
+  "name": "smc-vendor-app",
+  "version": "1.0.0",
+  "description": "SMC Vendor Management Mobile App with Offline Support",
+  "main": "index.js",
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start",
+    "test": "jest",
+    "lint": "eslint .",
+    "build:android": "cd android && ./gradlew assembleRelease",
+    "build:ios": "cd ios && xcodebuild -workspace SMCVendorApp.xcworkspace -scheme SMCVendorApp -configuration Release"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-native": "0.72.0",
+    "@react-navigation/native": "^6.1.0",
+    "@react-navigation/stack": "^6.3.0",
+    "react-native-camera": "^4.2.1",
+    "react-native-qrcode-scanner": "^1.5.5",
+    "@react-native-async-storage/async-storage": "^1.19.0",
+    "react-native-sqlite-storage": "^6.0.1",
+    "react-native-permissions": "^3.8.0",
+    "react-native-geolocation-service": "^5.3.0",
+    "@react-native-community/netinfo": "^9.4.0",
+    "axios": "^1.4.0",
+    "react-native-image-picker": "^5.6.0",
+    "react-native-maps": "^1.7.0",
+    "react-native-vector-icons": "^10.0.0",
+    "react-native-fs": "^2.20.0",
+    "react-native-device-info": "^10.7.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@babel/preset-env": "^7.20.0",
+    "@babel/runtime": "^7.20.0",
+    "@react-native/eslint-config": "^0.72.0",
+    "@react-native/metro-config": "^0.72.0",
+    "metro-react-native-babel-preset": "0.76.5",
+    "jest": "^29.2.1",
+    "eslint": "^8.19.0",
+    "prettier": "^2.4.1"
+  },
+  "jest": {
+    "preset": "react-native"
+  },
+  "keywords": [
+    "react-native",
+    "smc",
+    "vendor-management",
+    "offline",
+    "geofencing",
+    "solapur"
+  ],
+  "author": "Solapur Municipal Corporation",
+  "license": "MIT"
+}

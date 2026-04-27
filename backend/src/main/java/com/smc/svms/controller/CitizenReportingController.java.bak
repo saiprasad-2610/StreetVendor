@@ -1,0 +1,278 @@
+package com.smc.svms.controller;
+
+import com.smc.svms.dto.ApiResponse;
+import com.smc.svms.entity.CitizenReport;
+import com.smc.svms.entity.ReportStatus;
+import com.smc.svms.entity.ReportType;
+import com.smc.svms.repository.CitizenReportRepository;
+import com.smc.svms.service.CitizenReportingService;
+import com.smc.svms.dto.CitizenReportRequest;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import org.springframework.web.multipart.MultipartFile;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@RestController
+@RequestMapping("/api/citizen-reports")
+@RequiredArgsConstructor
+public class CitizenReportingController {
+    
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CitizenReportingController.class);
+    
+    private final CitizenReportingService reportingService;
+    private final CitizenReportRepository reportRepository;
+    
+    /**
+     * Submit citizen report
+     */
+    @PostMapping("/submit")
+    public ResponseEntity<ApiResponse<com.smc.svms.service.CitizenReportResult>> submitReport(
+            @ModelAttribute @Valid CitizenReportRequest request,
+            HttpServletRequest httpRequest) {
+        
+        try {
+            com.smc.svms.service.CitizenReportResult result = reportingService.submitReport(request, httpRequest);
+            
+            return ResponseEntity.ok(ApiResponse.success(result));
+            
+        } catch (Exception e) {
+            log.error("Failed to submit citizen report", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.error("Failed to submit report"));
+        }
+    }
+    
+    /**
+     * Get report status
+     */
+    @GetMapping("/status/{reportId}")
+    public ResponseEntity<ApiResponse<CitizenReport>> getReportStatus(@PathVariable Long reportId) {
+        
+        CitizenReport report = reportRepository.findById(reportId)
+            .orElseThrow(() -> new RuntimeException("Report not found"));
+        
+        return ResponseEntity.ok(ApiResponse.success(report));
+    }
+    
+    /**
+     * Get reports for citizen
+     */
+    @GetMapping("/my-reports")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> getMyReports(
+            @RequestParam String phoneNumber,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<CitizenReport> reports = reportRepository
+            .findByReporterPhoneOrderByCreatedAtDesc(phoneNumber, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.success(reports.getContent()));
+    }
+    
+    /**
+     * Get report statistics (public)
+     */
+    @GetMapping("/statistics")
+    public ResponseEntity<ApiResponse<ReportStatistics>> getStatistics(
+            @RequestParam(defaultValue = "30") int days) {
+        
+        LocalDate startDate = LocalDate.now().minusDays(days);
+        
+        List<CitizenReport> reports = reportRepository
+            .findByCreatedAtAfter(startDate.atStartOfDay());
+        
+        ReportStatistics stats = ReportStatistics.builder()
+            .totalReports(reports.size())
+            .byStatus(reports.stream()
+                .collect(Collectors.groupingBy(CitizenReport::getStatus, Collectors.counting())))
+            .byType(reports.stream()
+                .collect(Collectors.groupingBy(CitizenReport::getReportType, Collectors.counting())))
+            .resolvedCount(reports.stream()
+                .mapToLong(r -> r.getStatus() == ReportStatus.RESOLVED ? 1 : 0)
+                .sum())
+            .averageResolutionTime(calculateAverageResolutionTime(reports))
+            .build();
+        
+        return ResponseEntity.ok(ApiResponse.success(stats));
+    }
+    
+    /**
+     * Get pending reports (for officers)
+     */
+    @GetMapping("/pending")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> getPendingReports() {
+        
+        Pageable pageable = PageRequest.of(0, 100, Sort.by("createdAt").descending());
+        Page<CitizenReport> reports = reportRepository
+            .findByStatusOrderByCreatedAtDesc(ReportStatus.PENDING_REVIEW, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.success(reports.getContent()));
+    }
+    
+    /**
+     * Update report status (for officers)
+     */
+    @PutMapping("/{reportId}/status")
+    public ResponseEntity<ApiResponse<String>> updateReportStatus(
+            @PathVariable Long reportId,
+            @RequestBody StatusUpdateRequest request,
+            @RequestHeader("X-User-ID") Long officerId) {
+        
+        try {
+            CitizenReport report = reportRepository.findById(reportId)
+                .orElseThrow(() -> new RuntimeException("Report not found"));
+            
+            report.setStatus(request.getStatus());
+            report.setResolutionNotes(request.getResolutionNotes());
+            
+            reportRepository.save(report);
+            
+            return ResponseEntity.ok(ApiResponse.success("Report status updated successfully"));
+            
+        } catch (Exception e) {
+            log.error("Failed to update report status", e);
+            return ResponseEntity.badRequest()
+                .body(ApiResponse.error("Failed to update status"));
+        }
+    }
+    
+    /**
+     * Get reports by type
+     */
+    @GetMapping("/type/{reportType}")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> getReportsByType(
+            @PathVariable ReportType reportType,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<CitizenReport> reports = reportRepository
+            .findByReportTypeOrderByCreatedAtDesc(reportType, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.success(reports.getContent()));
+    }
+    
+    /**
+     * Get reports by status
+     */
+    @GetMapping("/status/{status}")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> getReportsByStatus(
+            @PathVariable ReportStatus status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<CitizenReport> reports = reportRepository
+            .findByStatusOrderByCreatedAtDesc(status, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.success(reports.getContent()));
+    }
+    
+    /**
+     * Get high confidence reports (for officers)
+     */
+    @GetMapping("/high-confidence")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> getHighConfidenceReports(
+            @RequestParam(defaultValue = "0.8") double minScore) {
+        
+        List<CitizenReport> reports = reportRepository
+            .findByValidationScoreGreaterThanEqualOrderByValidationScoreDesc(minScore);
+        
+        return ResponseEntity.ok(ApiResponse.success(reports));
+    }
+    
+    /**
+     * Search reports
+     */
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> searchReports(
+            @RequestParam String searchTerm,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<CitizenReport> reports = reportRepository
+            .searchReports(searchTerm, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.success(reports.getContent()));
+    }
+    
+    /**
+     * Get reports by date range
+     */
+    @GetMapping("/date-range")
+    public ResponseEntity<ApiResponse<List<CitizenReport>>> getReportsByDateRange(
+            @RequestParam LocalDate startDate,
+            @RequestParam LocalDate endDate,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Page<CitizenReport> reports = reportRepository
+            .findByCreatedAtBetweenOrderByCreatedAtDesc(
+                startDate.atStartOfDay(),
+                endDate.atTime(23, 59, 59),
+                pageable
+            );
+        
+        return ResponseEntity.ok(ApiResponse.success(reports.getContent()));
+    }
+    
+    private double calculateAverageResolutionTime(List<CitizenReport> reports) {
+        return reports.stream()
+            .filter(r -> r.getStatus() == ReportStatus.RESOLVED && r.getUpdatedAt() != null)
+            .mapToLong(r -> java.time.Duration.between(r.getCreatedAt(), r.getUpdatedAt()).toMinutes())
+            .average()
+            .orElse(0.0);
+    }
+}
+
+
+class StatusUpdateRequest {
+    private ReportStatus status;
+    private String resolutionNotes;
+    
+    public StatusUpdateRequest() {}
+    
+    public ReportStatus getStatus() { return status; }
+    public void setStatus(ReportStatus status) { this.status = status; }
+    
+    public String getResolutionNotes() { return resolutionNotes; }
+    public void setResolutionNotes(String resolutionNotes) { this.resolutionNotes = resolutionNotes; }
+}
+
+class ReportStatistics {
+    private long totalReports;
+    private Map<ReportStatus, Long> byStatus;
+    private Map<ReportType, Long> byType;
+    private long resolvedCount;
+    private double averageResolutionTime;
+    
+    public ReportStatistics() {}
+    
+    public static Builder builder() { return new Builder(); }
+    
+    public static class Builder {
+        private ReportStatistics s = new ReportStatistics();
+        public Builder totalReports(long v) { s.totalReports = v; return this; }
+        public Builder byStatus(Map<ReportStatus, Long> v) { s.byStatus = v; return this; }
+        public Builder byType(Map<ReportType, Long> v) { s.byType = v; return this; }
+        public Builder resolvedCount(long v) { s.resolvedCount = v; return this; }
+        public Builder averageResolutionTime(double v) { s.averageResolutionTime = v; return this; }
+        public ReportStatistics build() { return s; }
+    }
+}

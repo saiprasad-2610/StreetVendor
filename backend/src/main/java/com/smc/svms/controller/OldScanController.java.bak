@@ -1,0 +1,51 @@
+package com.smc.svms.controller;
+
+import com.smc.svms.dto.ScanRequest;
+import com.smc.svms.dto.ScanValidationResponse;
+import com.smc.svms.service.OptimizedScanService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/scan")
+@RequiredArgsConstructor
+@Slf4j
+public class ScanController {
+
+    private final OptimizedScanService optimizedScanService;
+
+    @PostMapping("/validate")
+    public ResponseEntity<ScanValidationResponse> validateLocation(@RequestBody ScanRequest request) {
+        log.info("Optimized scan validation request for vendor: {} at ({}, {}) with accuracy {}m", 
+                request.getVendorId(), request.getLatitude(), request.getLongitude(), request.getGpsAccuracy());
+        
+        ScanValidationResponse response = optimizedScanService.validateVendorLocation(request);
+        
+        log.info("Validation result: {} - Distance: {}m - {}", 
+                response.getValidationStatus(), Math.round(response.getDistance()), response.getMessage());
+        
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/algorithm-info")
+    public ResponseEntity<AlgorithmInfo> getAlgorithmInfo() {
+        return ResponseEntity.ok(AlgorithmInfo.builder()
+            .algorithm("Vincenty's Formula")
+            .accuracy("99.999% (~0.5mm error)")
+            .performance("Optimized for high precision")
+            .features(new String[]{"Adaptive thresholds", "GPS quality awareness", "Confidence scoring"})
+            .build());
+    }
+
+    // Inner class for algorithm info
+    @lombok.Data
+    @lombok.Builder
+    public static class AlgorithmInfo {
+        private String algorithm;
+        private String accuracy;
+        private String performance;
+        private String[] features;
+    }
+}

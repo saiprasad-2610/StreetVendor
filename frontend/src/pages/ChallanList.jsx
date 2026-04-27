@@ -15,8 +15,10 @@ const ChallanList = () => {
   const fetchChallans = async () => {
     try {
       const response = await axios.get('/api/challans');
-      if (Array.isArray(response.data)) {
-        setChallans(response.data);
+      // Backend returns ApiResponse wrapper, need to access response.data.data
+      const challansData = response.data?.data || response.data;
+      if (Array.isArray(challansData)) {
+        setChallans(challansData);
       } else {
         console.error("Expected array but got:", response.data);
         setChallans([]);
