@@ -7,6 +7,7 @@ import VendorRegister from './pages/VendorRegister';
 import Dashboard from './pages/Dashboard';
 import VendorList from './pages/VendorList';
 import VendorDetail from './pages/VendorDetail';
+import VendorRentHistory from './pages/VendorRentHistory';
 import AddVendor from './pages/AddVendor';
 import QRScanner from './pages/QRScanner';
 import ViolationList from './pages/ViolationList';
@@ -104,6 +105,14 @@ function App() {
                   <Navbar />
                   <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
                     <VendorChallans />
+                  </div>
+                </ProtectedRoute>
+              } />
+              <Route path="/my-rent-history" element={
+                <ProtectedRoute>
+                  <Navbar />
+                  <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+                    <VendorRentHistory />
                   </div>
                 </ProtectedRoute>
               } />

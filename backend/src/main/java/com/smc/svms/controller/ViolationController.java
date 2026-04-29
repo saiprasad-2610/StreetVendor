@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.validation.Valid;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -40,9 +41,26 @@ public class ViolationController {
             @RequestParam("gpsLongitude") Double gpsLongitude,
             @RequestParam(value = "reporterName", required = false) String reporterName,
             @RequestParam(value = "reporterPhone", required = false) String reporterPhone,
-            @RequestParam(value = "image", required = false) MultipartFile image) {
+            @RequestParam(value = "image", required = false) MultipartFile image,
+            @RequestParam(value = "images", required = false) List<MultipartFile> images,
+            @RequestParam(value = "photoCount", required = false) Integer photoCount) {
         
         try {
+            log.info("Violation report received for vendor: {} with {} photos", vendorId, photoCount);
+            
+            // Handle multiple images
+            List<MultipartFile> imageList = new ArrayList<>();
+            if (images != null && !images.isEmpty()) {
+                imageList.addAll(images);
+            } else if (image != null && !image.isEmpty()) {
+                imageList.add(image);
+            }
+            
+            if (imageList.isEmpty()) {
+                return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("At least one photo is required for violation report"));
+            }
+            
             ViolationRequest request = new ViolationRequest();
             request.setVendorId(vendorId);
             request.setDescription(description);
@@ -52,8 +70,10 @@ public class ViolationController {
             request.setReporterPhone(reporterPhone);
             request.setCapturedAt(LocalDateTime.now());
 
-            violationService.reportViolation(request, image);
-            return ResponseEntity.ok(ApiResponse.success("Violation reported successfully"));
+            // Save all images and get URLs
+            List<String> imageUrls = violationService.reportViolationWithImages(request, imageList);
+            log.info("Violation reported successfully with {} images", imageUrls.size());
+            return ResponseEntity.ok(ApiResponse.success("Violation reported successfully with " + imageUrls.size() + " images"));
         } catch (Exception e) {
             log.error("Failed to report violation", e);
             return ResponseEntity.badRequest()
@@ -229,7 +249,7 @@ public class ViolationController {
     @GetMapping("/auto-detected")
     @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
     public ResponseEntity<ApiResponse<List<Violation>>> getAutoDetectedViolations() {
-        
+
         try {
             List<Violation> violations = violationService.getAutoDetectedViolations();
             return ResponseEntity.ok(ApiResponse.success(violations));
@@ -237,6 +257,67 @@ public class ViolationController {
             // Failed to get auto-detected violations
             return ResponseEntity.internalServerError()
                 .body(ApiResponse.error("Failed to fetch violations"));
+        }
+    }
+
+    /**
+     * Resolve a violation with one of three actions:
+     * - ISSUE_CHALLAN: Issue a fine to the vendor
+     * - ISSUE_WARNING: Send a warning notification (max 3 warnings)
+     * - NO_ACTION: Dismiss as fake/invalid violation
+     */
+    @PostMapping("/{violationId}/resolve")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
+    public ResponseEntity<ApiResponse<Violation>> resolveViolation(
+            @PathVariable Long violationId,
+            @RequestBody @Valid ResolveViolationRequest request,
+            @RequestHeader("X-User-ID") Long officerId) {
+
+        try {
+            Violation resolvedViolation = violationService.resolveViolation(
+                    violationId,
+                    request.getActionAsEnum(),
+                    request.getNotes(),
+                    officerId
+            );
+
+            String message = switch (request.getActionAsEnum()) {
+                case ISSUE_CHALLAN -> "Challan issued successfully";
+                case ISSUE_WARNING -> "Warning #" + resolvedViolation.getWarningNumber() + " issued to vendor";
+                case NO_ACTION -> "Violation marked as fake/invalid and dismissed";
+            };
+
+            return ResponseEntity.ok(ApiResponse.success(message, resolvedViolation));
+
+        } catch (Exception e) {
+            log.error("Failed to resolve violation {}", violationId, e);
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Failed to resolve violation: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Get violation by ID
+     */
+    @GetMapping("/{violationId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER')")
+    public ResponseEntity<ApiResponse<Violation>> getViolationById(@PathVariable Long violationId) {
+
+        try {
+            // This would need a findById method in the service
+            // For now, we'll get all and filter
+            List<Violation> violations = violationService.getAllViolations();
+            Violation violation = violations.stream()
+                    .filter(v -> v.getId().equals(violationId))
+                    .findFirst()
+                    .orElseThrow(() -> new RuntimeException("Violation not found"));
+
+            return ResponseEntity.ok(ApiResponse.success(violation));
+
+        } catch (Exception e) {
+            log.error("Failed to get violation {}", violationId, e);
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Failed to get violation: " + e.getMessage()));
         }
     }
 }
@@ -381,6 +462,38 @@ class ViolationStatistics {
         
         public ViolationStatistics build() {
             return new ViolationStatistics(totalViolations, autoDetected, manualDetected, autoDetectionRate);
+        }
+    }
+}
+
+/**
+ * DTO for resolving a violation with one of three actions
+ */
+class ResolveViolationRequest {
+    private String action;  // Accept string for frontend compatibility
+    private String notes;
+
+    public ResolveViolationRequest() {}
+
+    public ResolveViolationRequest(String action, String notes) {
+        this.action = action;
+        this.notes = notes;
+    }
+
+    // Getters and Setters
+    public String getAction() { return action; }
+    public void setAction(String action) { this.action = action; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
+
+    // Helper method to convert string to enum
+    public com.smc.svms.enums.ViolationAction getActionAsEnum() {
+        if (action == null) return null;
+        try {
+            return com.smc.svms.enums.ViolationAction.valueOf(action);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid action: " + action);
         }
     }
 }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import { GoogleMap, useJsApiLoader, Marker, Circle, Polygon } from '@react-google-maps/api';
-import { MapPin, Plus, Trash2, Save, X, AlertTriangle, CheckCircle, Edit3 } from 'lucide-react';
+import { MapPin, Plus, Trash2, Save, X, AlertTriangle, CheckCircle, Edit3, Eye } from 'lucide-react';
 
 const containerStyle = {
   width: '100%',
@@ -14,6 +15,7 @@ const solapurCenter = {
 };
 
 const ZoneManagement = () => {
+  const navigate = useNavigate();
   const [zones, setZones] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
@@ -41,17 +43,19 @@ const ZoneManagement = () => {
     zoneType: 'ALLOWED',
     latitude: 17.6599,
     longitude: 75.9064,
-    radiusMeters: 100,
+    radiusFeet: 328,
     monthlyRent: 500,
-    lengthMeters: 0,
-    breadthMeters: 0,
-    totalSizeSqMeters: 0,
+    rentPerSqFt: 10,
+    lengthFeet: 0,
+    breadthFeet: 0,
+    totalSizeSqFt: 0,
     polygonCoordinates: null,
     isActive: true,
     isAvailable: true,
-    rectLength: 10,
-    rectBreadth: 10
+    rectLengthFeet: 33,
+    rectBreadthFeet: 33
   });
+  const [isOverlapping, setIsOverlapping] = useState(false);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -89,45 +93,58 @@ const ZoneManagement = () => {
     }
   };
 
-  const getZoomForRadius = (radiusMeters) => {
-    const r = Number(radiusMeters || 0);
-    if (r <= 30) return 19;
-    if (r <= 80) return 18;
-    if (r <= 200) return 17;
-    if (r <= 500) return 15;
+  const getZoomForRadius = (radiusFeet) => {
+    const r = Number(radiusFeet || 0);
+    if (r <= 100) return 19;
+    if (r <= 262) return 18;
+    if (r <= 656) return 17;
+    if (r <= 1640) return 15;
     return 14;
   };
 
   const getZoneColor = (zone, index) => {
     const isSelected = selectedZoneId === zone.id;
     const isAvailable = zone.isAvailable !== false; // Default to true if not set
-    
-    // If selected, use green
+    const isRestricted = zone.zoneType === 'RESTRICTED';
+
+    // If selected, use darker green for any zone type
     if (isSelected) {
       return {
-        fillColor: '#22c55e',
-        strokeColor: '#16a34a',
-        fillOpacity: 0.5,
+        fillColor: '#16a34a',
+        strokeColor: '#15803d',
+        fillOpacity: 0.6,
         strokeOpacity: 1,
-        strokeWeight: 5
+        strokeWeight: 4
       };
     }
-    
-    // If not available (allocated), use red/orange
-    if (!isAvailable) {
+
+    // RESTRICTED zones - Red (regardless of availability)
+    if (isRestricted) {
       return {
-        fillColor: '#ef4444',
-        strokeColor: '#dc2626',
+        fillColor: '#f87171',
+        strokeColor: '#ef4444',
         fillOpacity: 0.4,
         strokeOpacity: 0.9,
         strokeWeight: 3
       };
     }
-    
-    // Available zones use yellow
+
+    // ALLOWED zones - Green if available, Purple if allocated
+    if (!isAvailable) {
+      // ALLOCATED (not available) zones - Dark Purple
+      return {
+        fillColor: '#7c3aed',
+        strokeColor: '#6d28d9',
+        fillOpacity: 0.5,
+        strokeOpacity: 0.9,
+        strokeWeight: 3
+      };
+    }
+
+    // ALLOWED + AVAILABLE zones - Green
     return {
-      fillColor: '#FFD700',
-      strokeColor: '#FFA500',
+      fillColor: '#22c55e',
+      strokeColor: '#16a34a',
       fillOpacity: 0.4,
       strokeOpacity: 0.9,
       strokeWeight: 3
@@ -353,6 +370,151 @@ const ZoneManagement = () => {
     return points;
   };
 
+  // Haversine distance calculation
+  const calculateDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // Check if point is inside polygon
+  const isPointInPolygon = (point, polygon) => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].lng, yi = polygon[i].lat;
+      const xj = polygon[j].lng, yj = polygon[j].lat;
+      if (((yi > point.lat) !== (yj > point.lat)) &&
+          (point.lng < (xj - xi) * (point.lat - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  // Check if two circles overlap
+  const circlesOverlap = (center1, radius1, center2, radius2) => {
+    const distance = calculateDistance(center1.lat, center1.lng, center2.lat, center2.lng);
+    return distance < (radius1 + radius2);
+  };
+
+  // Check if circle overlaps with polygon
+  const circlePolygonOverlap = (circleCenter, circleRadius, polygon) => {
+    // Check if circle center is inside polygon
+    if (isPointInPolygon(circleCenter, polygon)) return true;
+    // Check if any polygon vertex is inside circle
+    for (const vertex of polygon) {
+      if (calculateDistance(circleCenter.lat, circleCenter.lng, vertex.lat, vertex.lng) <= circleRadius) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Check if two polygons overlap
+  const polygonsOverlap = (polygon1, polygon2) => {
+    // Check if any point of polygon1 is inside polygon2
+    for (const point of polygon1) {
+      if (isPointInPolygon(point, polygon2)) return true;
+    }
+    // Check if any point of polygon2 is inside polygon1
+    for (const point of polygon2) {
+      if (isPointInPolygon(point, polygon1)) return true;
+    }
+    return false;
+  };
+
+  // Check if new zone overlaps with existing zones
+  const checkOverlap = () => {
+    if (!zones || zones.length === 0) return false;
+
+    for (const existingZone of zones) {
+      if (!existingZone.isActive) continue;
+
+      const existingPolygon = existingZone.polygonCoordinatesJson || existingZone.polygonCoordinates;
+      const existingPolygonData = existingPolygon ? JSON.parse(existingPolygon) : null;
+
+      // New zone is a circle
+      if (drawingMode === 'circle') {
+        const newCenter = { lat: newZone.latitude, lng: newZone.longitude };
+        const newRadius = newZone.radiusMeters;
+
+        if (existingPolygonData) {
+          // Circle vs Polygon
+          if (circlePolygonOverlap(newCenter, newRadius, existingPolygonData)) return true;
+        } else {
+          // Circle vs Circle
+          const existingCenter = {
+            lat: Number(existingZone.centerLatitude || existingZone.latitude),
+            lng: Number(existingZone.centerLongitude || existingZone.longitude)
+          };
+          const existingRadius = existingZone.radiusMeters || 0;
+          if (circlesOverlap(newCenter, newRadius, existingCenter, existingRadius)) return true;
+        }
+      }
+      // New zone is a polygon
+      else if (drawingMode === 'polygon' && polygonPoints.length >= 3) {
+        if (existingPolygonData) {
+          // Polygon vs Polygon
+          if (polygonsOverlap(polygonPoints, existingPolygonData)) return true;
+        } else {
+          // Polygon vs Circle
+          const existingCenter = {
+            lat: Number(existingZone.centerLatitude || existingZone.latitude),
+            lng: Number(existingZone.centerLongitude || existingZone.longitude)
+          };
+          const existingRadius = existingZone.radiusMeters || 0;
+          if (circlePolygonOverlap(existingCenter, existingRadius, polygonPoints)) return true;
+        }
+      }
+      // New zone is a rectangle
+      else if (drawingMode === 'rectangle' && newZone.rectLengthFeet > 0 && newZone.rectBreadthFeet > 0) {
+        const newPolygon = generateRectanglePolygon(newZone.latitude, newZone.longitude, newZone.rectLengthFeet / 3.281, newZone.rectBreadthFeet / 3.281);
+        if (existingPolygonData) {
+          // Rectangle vs Polygon
+          if (polygonsOverlap(newPolygon, existingPolygonData)) return true;
+        } else {
+          // Rectangle vs Circle
+          const existingCenter = {
+            lat: Number(existingZone.centerLatitude || existingZone.latitude),
+            lng: Number(existingZone.centerLongitude || existingZone.longitude)
+          };
+          const existingRadius = existingZone.radiusMeters || 0;
+          if (circlePolygonOverlap(existingCenter, existingRadius, newPolygon)) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  // Update overlap status when zone data changes
+  useEffect(() => {
+    setIsOverlapping(checkOverlap());
+  }, [newZone, polygonPoints, drawingMode, zones]);
+
+  // Auto-calculate monthly rent from area and rent per sq ft
+  useEffect(() => {
+    let areaInSqFt = 0;
+
+    if (drawingMode === 'polygon' && polygonPoints.length >= 3) {
+      const areaInSqMeters = calculatePolygonArea(polygonPoints);
+      areaInSqFt = areaInSqMeters * 10.764;
+    } else if (drawingMode === 'circle') {
+      const radiusFeet = newZone.radiusFeet;
+      areaInSqFt = Math.PI * radiusFeet * radiusFeet;
+    } else if (drawingMode === 'rectangle' && newZone.rectLengthFeet > 0 && newZone.rectBreadthFeet > 0) {
+      areaInSqFt = newZone.rectLengthFeet * newZone.rectBreadthFeet;
+    }
+
+    const calculatedRent = Math.round(areaInSqFt * newZone.rentPerSqFt);
+
+    setNewZone(prev => ({ ...prev, monthlyRent: calculatedRent }));
+  }, [newZone.rentPerSqFt, newZone.radiusFeet, newZone.rectLengthFeet, newZone.rectBreadthFeet, polygonPoints, drawingMode]);
+
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
       alert('Geolocation is not supported by your browser');
@@ -383,7 +545,19 @@ const ZoneManagement = () => {
   const handleMapClick = useCallback((e) => {
     if (isDrawing && drawingMode === 'polygon') {
       const newPoint = { lat: e.latLng.lat(), lng: e.latLng.lng() };
-      setPolygonPoints(prev => [...prev, newPoint]);
+      const updatedPoints = [...polygonPoints, newPoint];
+      setPolygonPoints(updatedPoints);
+      // Auto-update zone center to polygon centroid (for 3+ points)
+      if (updatedPoints.length >= 3) {
+        const centroid = calculatePolygonCentroid(updatedPoints);
+        if (centroid) {
+          setNewZone(prev => ({
+            ...prev,
+            latitude: centroid.lat,
+            longitude: centroid.lng
+          }));
+        }
+      }
     } else if (isAdding && (drawingMode === 'circle' || drawingMode === 'rectangle')) {
       setNewZone(prev => ({
         ...prev,
@@ -391,7 +565,7 @@ const ZoneManagement = () => {
         longitude: e.latLng.lng()
       }));
     }
-  }, [isDrawing, drawingMode, isAdding]);
+  }, [isDrawing, drawingMode, isAdding, polygonPoints]);
 
   const handleSaveZone = async () => {
     if (!newZone.name) {
@@ -402,15 +576,19 @@ const ZoneManagement = () => {
       alert("Please draw at least 3 points for a polygon zone");
       return;
     }
-    if (drawingMode === 'rectangle' && (!newZone.rectLength || !newZone.rectBreadth)) {
+    if (drawingMode === 'rectangle' && (!newZone.rectLengthFeet || !newZone.rectBreadthFeet)) {
       alert("Please enter length and breadth for rectangle zone");
       return;
     }
+    if (isOverlapping) {
+      alert("Cannot save zone: This zone overlaps with an existing zone. Please choose a different location or adjust the zone boundaries.");
+      return;
+    }
     try {
-      // Auto-calculate dimensions for polygon zones
-      let lengthMeters = newZone.lengthMeters;
-      let breadthMeters = newZone.breadthMeters;
-      let totalSizeSqMeters = newZone.totalSizeSqMeters;
+      // Auto-calculate dimensions for polygon zones (convert to meters for backend)
+      let lengthMeters = 0;
+      let breadthMeters = 0;
+      let totalSizeSqMeters = 0;
       let finalPolygonPoints = polygonPoints;
 
       if (drawingMode === 'polygon' && polygonPoints.length >= 3) {
@@ -419,33 +597,45 @@ const ZoneManagement = () => {
         lengthMeters = dimensions.length.toFixed(2);
         breadthMeters = dimensions.breadth.toFixed(2);
         totalSizeSqMeters = area.toFixed(2);
+        // Auto-calculate centroid from polygon and set as zone center
+        const centroid = calculatePolygonCentroid(polygonPoints);
+        if (centroid) {
+          setNewZone(prev => ({
+            ...prev,
+            latitude: centroid.lat,
+            longitude: centroid.lng
+          }));
+        }
       } else if (drawingMode === 'circle') {
-        // For circle zones, calculate from radius
-        const radius = newZone.radiusMeters;
-        lengthMeters = (radius * 2).toFixed(2);
-        breadthMeters = (radius * 2).toFixed(2);
-        totalSizeSqMeters = (Math.PI * radius * radius).toFixed(2);
+        // For circle zones, convert feet to meters
+        const radiusFeet = newZone.radiusFeet;
+        const radiusMeters = radiusFeet / 3.281;
+        lengthMeters = (radiusMeters * 2).toFixed(2);
+        breadthMeters = (radiusMeters * 2).toFixed(2);
+        totalSizeSqMeters = (Math.PI * radiusMeters * radiusMeters).toFixed(2);
       } else if (drawingMode === 'rectangle') {
-        // For rectangle zones, use entered dimensions
-        lengthMeters = newZone.rectLength;
-        breadthMeters = newZone.rectBreadth;
-        totalSizeSqMeters = (newZone.rectLength * newZone.rectBreadth).toFixed(2);
-        // Generate rectangle polygon from center point
+        // For rectangle zones, convert feet to meters
+        const lengthFeet = newZone.rectLengthFeet;
+        const breadthFeet = newZone.rectBreadthFeet;
+        lengthMeters = (lengthFeet / 3.281).toFixed(2);
+        breadthMeters = (breadthFeet / 3.281).toFixed(2);
+        totalSizeSqMeters = ((lengthFeet * breadthFeet) / 10.764).toFixed(2);
+        // Generate rectangle polygon from center point (convert to meters)
         finalPolygonPoints = generateRectanglePolygon(
           newZone.latitude,
           newZone.longitude,
-          newZone.rectLength,
-          newZone.rectBreadth
+          lengthFeet / 3.281,
+          breadthFeet / 3.281
         );
       }
 
-      // Send fields matching backend validation requirements
+      // Send fields matching backend validation requirements (convert feet to meters)
       const zoneToSave = {
         name: newZone.name,
         zoneType: newZone.zoneType,
         centerLatitude: newZone.latitude,
         centerLongitude: newZone.longitude,
-        radiusMeters: drawingMode === 'circle' ? newZone.radiusMeters : null,
+        radiusMeters: drawingMode === 'circle' ? (newZone.radiusFeet / 3.281) : null,
         monthlyRent: newZone.monthlyRent,
         lengthMeters: parseFloat(lengthMeters) || null,
         breadthMeters: parseFloat(breadthMeters) || null,
@@ -470,16 +660,17 @@ const ZoneManagement = () => {
         zoneType: 'ALLOWED',
         latitude: 17.6599,
         longitude: 75.9064,
-        radiusMeters: 100,
+        radiusFeet: 328,
         monthlyRent: 500,
-        lengthMeters: 0,
-        breadthMeters: 0,
-        totalSizeSqMeters: 0,
+        rentPerSqFt: 10,
+        lengthFeet: 0,
+        breadthFeet: 0,
+        totalSizeSqFt: 0,
         polygonCoordinates: null,
         isActive: true,
         isAvailable: true,
-        rectLength: 10,
-        rectBreadth: 10
+        rectLengthFeet: 33,
+        rectBreadthFeet: 33
       });
       fetchZones();
     } catch (err) {
@@ -625,9 +816,9 @@ const ZoneManagement = () => {
                 <Polygon
                   paths={polygonPoints}
                   options={{
-                    fillColor: newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                    fillColor: isOverlapping ? '#ef4444' : (newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444'),
                     fillOpacity: 0.4,
-                    strokeColor: newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                    strokeColor: isOverlapping ? '#dc2626' : (newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444'),
                     strokeWeight: 3,
                   }}
                 />
@@ -640,28 +831,28 @@ const ZoneManagement = () => {
                   }} />
                   <Circle
                     center={{ lat: newZone.latitude, lng: newZone.longitude }}
-                    radius={newZone.radiusMeters}
+                    radius={newZone.radiusFeet / 3.281}
                     options={{
-                      fillColor: newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                      fillColor: isOverlapping ? '#ef4444' : (newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444'),
                       fillOpacity: 0.4,
-                      strokeColor: newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                      strokeColor: isOverlapping ? '#dc2626' : (newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444'),
                       strokeWeight: 4,
                     }}
                   />
                 </>
               )}
 
-              {isAdding && drawingMode === 'rectangle' && newZone.rectLength > 0 && newZone.rectBreadth > 0 && (
+              {isAdding && drawingMode === 'rectangle' && newZone.rectLengthFeet > 0 && newZone.rectBreadthFeet > 0 && (
                 <>
                   <Marker position={{ lat: newZone.latitude, lng: newZone.longitude }} draggable={true} onDragEnd={(e) => {
                     setNewZone(prev => ({ ...prev, latitude: e.latLng.lat(), longitude: e.latLng.lng() }));
                   }} />
                   <Polygon
-                    paths={generateRectanglePolygon(newZone.latitude, newZone.longitude, newZone.rectLength, newZone.rectBreadth)}
+                    paths={generateRectanglePolygon(newZone.latitude, newZone.longitude, newZone.rectLengthFeet / 3.281, newZone.rectBreadthFeet / 3.281)}
                     options={{
-                      fillColor: newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                      fillColor: isOverlapping ? '#ef4444' : (newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444'),
                       fillOpacity: 0.4,
-                      strokeColor: newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444',
+                      strokeColor: isOverlapping ? '#dc2626' : (newZone.zoneType === 'ALLOWED' ? '#22c55e' : '#ef4444'),
                       strokeWeight: 4,
                     }}
                   />
@@ -677,8 +868,7 @@ const ZoneManagement = () => {
             <div className="absolute top-4 left-4 bg-white/90 backdrop-blur p-2 rounded shadow text-xs font-bold flex gap-4">
               <div className="flex items-center gap-1"><div className="w-3 h-3 bg-green-500 rounded-full opacity-50"></div> Allowed Zone</div>
               <div className="flex items-center gap-1"><div className="w-3 h-3 bg-red-500 rounded-full opacity-50"></div> Restricted Zone</div>
-              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-blue-500 rounded-full opacity-50"></div> Available</div>
-              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-gray-500 rounded-full opacity-50"></div> Allocated</div>
+              <div className="flex items-center gap-1"><div className="w-3 h-3 bg-purple-600 rounded-full opacity-50"></div> Allocated</div>
             </div>
             <div className="absolute top-4 right-4 bg-white/90 backdrop-blur p-2 rounded shadow flex gap-2">
               <button
@@ -709,6 +899,38 @@ const ZoneManagement = () => {
               <h2 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <Plus className="text-blue-600" size={20} /> New Zone Details
               </h2>
+              {/* Warning about zone location */}
+              {(newZone.latitude === 17.6599 && newZone.longitude === 75.9064) ? (
+                <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-3 mb-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="text-yellow-600 flex-shrink-0 mt-0.5" size={18} />
+                    <div className="text-xs">
+                      <p className="font-bold text-yellow-700">⚠️ SET ZONE LOCATION!</p>
+                      <p className="text-yellow-800">
+                        Click on the map to set the <strong>actual location</strong> of this zone.
+                        Current location is default city center (17.6599, 75.9064).
+                        <br />
+                        <strong>Without correct location, vendors will show wrong distance!</strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-2 mb-4">
+                  <p className="text-xs text-green-700 font-semibold">
+                    ✅ Zone location set: {newZone.latitude.toFixed(6)}, {newZone.longitude.toFixed(6)}
+                  </p>
+                </div>
+              )}
+              {isOverlapping && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+                  <AlertTriangle className="text-red-600 flex-shrink-0 mt-0.5" size={16} />
+                  <div className="text-xs">
+                    <p className="font-bold text-red-700">Zone Overlap Detected!</p>
+                    <p className="text-red-600">This zone overlaps with an existing zone. Please choose a different location or adjust the boundaries.</p>
+                  </div>
+                </div>
+              )}
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-bold text-gray-500 uppercase">Zone Name</label>
@@ -768,15 +990,15 @@ const ZoneManagement = () => {
                         <div className="grid grid-cols-3 gap-1 text-xs">
                           <div>
                             <p className="text-gray-500">Length</p>
-                            <p className="font-bold">{calculatePolygonDimensions(polygonPoints).length.toFixed(2)} m</p>
+                            <p className="font-bold">{(calculatePolygonDimensions(polygonPoints).length * 3.281).toFixed(2)} ft</p>
                           </div>
                           <div>
                             <p className="text-gray-500">Breadth</p>
-                            <p className="font-bold">{calculatePolygonDimensions(polygonPoints).breadth.toFixed(2)} m</p>
+                            <p className="font-bold">{(calculatePolygonDimensions(polygonPoints).breadth * 3.281).toFixed(2)} ft</p>
                           </div>
                           <div>
                             <p className="text-gray-500">Area</p>
-                            <p className="font-bold">{calculatePolygonArea(polygonPoints).toFixed(2)} m²</p>
+                            <p className="font-bold">{(calculatePolygonArea(polygonPoints) * 10.764).toFixed(2)} sq ft</p>
                           </div>
                         </div>
                       </div>
@@ -805,15 +1027,15 @@ const ZoneManagement = () => {
                 )}
                 {drawingMode === 'circle' && (
                   <div>
-                    <label className="text-xs font-bold text-gray-500 uppercase">Radius (Meters): {newZone.radiusMeters}m</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Radius (Feet): {newZone.radiusFeet}ft</label>
                     <input
                       type="range"
-                      min="10"
-                      max="1000"
-                      step="10"
+                      min="33"
+                      max="3281"
+                      step="33"
                       className="w-full mt-1"
-                      value={newZone.radiusMeters}
-                      onChange={e => setNewZone({...newZone, radiusMeters: parseInt(e.target.value)})}
+                      value={newZone.radiusFeet}
+                      onChange={e => setNewZone({...newZone, radiusFeet: parseInt(e.target.value)})}
                     />
                   </div>
                 )}
@@ -824,41 +1046,41 @@ const ZoneManagement = () => {
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase">Length (m)</label>
+                        <label className="text-xs font-bold text-gray-500 uppercase">Length (ft)</label>
                         <input
                           type="number"
                           min="1"
-                          step="0.1"
+                          step="1"
                           className="w-full mt-1 px-2 py-1 border rounded text-sm"
-                          placeholder="e.g. 20"
-                          value={newZone.rectLength}
-                          onChange={e => setNewZone({...newZone, rectLength: parseFloat(e.target.value) || 0})}
+                          placeholder="e.g. 66"
+                          value={newZone.rectLengthFeet}
+                          onChange={e => setNewZone({...newZone, rectLengthFeet: parseFloat(e.target.value) || 0})}
                         />
                       </div>
                       <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase">Breadth (m)</label>
+                        <label className="text-xs font-bold text-gray-500 uppercase">Breadth (ft)</label>
                         <input
                           type="number"
                           min="1"
-                          step="0.1"
+                          step="1"
                           className="w-full mt-1 px-2 py-1 border rounded text-sm"
-                          placeholder="e.g. 10"
-                          value={newZone.rectBreadth}
-                          onChange={e => setNewZone({...newZone, rectBreadth: parseFloat(e.target.value) || 0})}
+                          placeholder="e.g. 33"
+                          value={newZone.rectBreadthFeet}
+                          onChange={e => setNewZone({...newZone, rectBreadthFeet: parseFloat(e.target.value) || 0})}
                         />
                       </div>
                     </div>
-                    {newZone.rectLength > 0 && newZone.rectBreadth > 0 && (
+                    {newZone.rectLengthFeet > 0 && newZone.rectBreadthFeet > 0 && (
                       <div className="mt-2 p-2 bg-white rounded border">
                         <p className="text-xs font-bold text-purple-700 mb-1">Calculated Size:</p>
                         <div className="grid grid-cols-2 gap-1 text-xs">
                           <div>
                             <p className="text-gray-500">Area</p>
-                            <p className="font-bold">{(newZone.rectLength * newZone.rectBreadth).toFixed(2)} m²</p>
+                            <p className="font-bold">{(newZone.rectLengthFeet * newZone.rectBreadthFeet).toFixed(2)} sq ft</p>
                           </div>
                           <div>
                             <p className="text-gray-500">Perimeter</p>
-                            <p className="font-bold">{(2 * (newZone.rectLength + newZone.rectBreadth)).toFixed(2)} m</p>
+                            <p className="font-bold">{(2 * (newZone.rectLengthFeet + newZone.rectBreadthFeet)).toFixed(2)} ft</p>
                           </div>
                         </div>
                       </div>
@@ -866,16 +1088,29 @@ const ZoneManagement = () => {
                   </div>
                 )}
                 <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase">Monthly Rent (₹)</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase">Rent per Sq Ft (₹)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="w-full mt-1 px-3 py-2 border rounded outline-none focus:ring-2 focus:ring-blue-600"
+                    placeholder="e.g. 10"
+                    value={newZone.rentPerSqFt}
+                    onChange={e => setNewZone({...newZone, rentPerSqFt: parseFloat(e.target.value) || 0})}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase">Monthly Rent (₹) - Auto-calculated</label>
                   <input
                     type="number"
                     min="0"
                     step="50"
-                    className="w-full mt-1 px-3 py-2 border rounded outline-none focus:ring-2 focus:ring-blue-600"
-                    placeholder="e.g. 500"
+                    className="w-full mt-1 px-3 py-2 border rounded outline-none focus:ring-2 focus:ring-blue-600 bg-gray-50"
+                    placeholder="Auto-calculated from area × rent/sq ft"
                     value={newZone.monthlyRent}
-                    onChange={e => setNewZone({...newZone, monthlyRent: parseInt(e.target.value) || 0})}
+                    readOnly
                   />
+                  <p className="text-xs text-gray-500 mt-1">Calculated: Area (sq ft) × Rent per sq ft</p>
                 </div>
                 
                 {/* Zone Size Preview - Auto-calculated */}
@@ -885,45 +1120,45 @@ const ZoneManagement = () => {
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Length</p>
-                        <p className="font-bold text-purple-600">{calculatePolygonDimensions(polygonPoints).length.toFixed(2)} m</p>
+                        <p className="font-bold text-purple-600">{(calculatePolygonDimensions(polygonPoints).length * 3.281).toFixed(2)} ft</p>
                       </div>
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Breadth</p>
-                        <p className="font-bold text-purple-600">{calculatePolygonDimensions(polygonPoints).breadth.toFixed(2)} m</p>
+                        <p className="font-bold text-purple-600">{(calculatePolygonDimensions(polygonPoints).breadth * 3.281).toFixed(2)} ft</p>
                       </div>
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Total</p>
-                        <p className="font-bold text-purple-600">{calculatePolygonArea(polygonPoints).toFixed(2)} m²</p>
+                        <p className="font-bold text-purple-600">{(calculatePolygonArea(polygonPoints) * 10.764).toFixed(2)} sq ft</p>
                       </div>
                     </div>
                   ) : drawingMode === 'circle' ? (
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Length</p>
-                        <p className="font-bold text-purple-600">{(newZone.radiusMeters * 2).toFixed(2)} m</p>
+                        <p className="font-bold text-purple-600">{(newZone.radiusFeet * 2).toFixed(2)} ft</p>
                       </div>
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Breadth</p>
-                        <p className="font-bold text-purple-600">{(newZone.radiusMeters * 2).toFixed(2)} m</p>
+                        <p className="font-bold text-purple-600">{(newZone.radiusFeet * 2).toFixed(2)} ft</p>
                       </div>
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Total</p>
-                        <p className="font-bold text-purple-600">{(Math.PI * newZone.radiusMeters * newZone.radiusMeters).toFixed(2)} m²</p>
+                        <p className="font-bold text-purple-600">{(Math.PI * newZone.radiusFeet * newZone.radiusFeet).toFixed(2)} sq ft</p>
                       </div>
                     </div>
-                  ) : drawingMode === 'rectangle' && newZone.rectLength > 0 && newZone.rectBreadth > 0 ? (
+                  ) : drawingMode === 'rectangle' && newZone.rectLengthFeet > 0 && newZone.rectBreadthFeet > 0 ? (
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Length</p>
-                        <p className="font-bold text-purple-600">{newZone.rectLength.toFixed(2)} m</p>
+                        <p className="font-bold text-purple-600">{newZone.rectLengthFeet.toFixed(2)} ft</p>
                       </div>
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Breadth</p>
-                        <p className="font-bold text-purple-600">{newZone.rectBreadth.toFixed(2)} m</p>
+                        <p className="font-bold text-purple-600">{newZone.rectBreadthFeet.toFixed(2)} ft</p>
                       </div>
                       <div className="bg-white rounded p-2">
                         <p className="text-gray-500">Total</p>
-                        <p className="font-bold text-purple-600">{(newZone.rectLength * newZone.rectBreadth).toFixed(2)} m²</p>
+                        <p className="font-bold text-purple-600">{(newZone.rectLengthFeet * newZone.rectBreadthFeet).toFixed(2)} sq ft</p>
                       </div>
                     </div>
                   ) : (
@@ -948,9 +1183,14 @@ const ZoneManagement = () => {
                 </div>
                 <button
                   onClick={handleSaveZone}
-                  className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                  disabled={isOverlapping}
+                  className={`w-full py-3 rounded-lg font-bold transition flex items-center justify-center gap-2 ${
+                    isOverlapping
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
                 >
-                  <Save size={18} /> Save Zone
+                  <Save size={18} /> {isOverlapping ? 'Cannot Save (Overlapping)' : 'Save Zone'}
                 </button>
               </div>
             </div>
@@ -1027,6 +1267,49 @@ const ZoneManagement = () => {
                 </div>
                 
                 <div className="p-6 space-y-6">
+                  {/* Allocated Vendors */}
+                  <div className="bg-blue-50 rounded-xl p-4">
+                    <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
+                      <CheckCircle size={18} className="text-blue-600" /> Allocated Vendors
+                    </h3>
+                    {loadingVendors ? (
+                      <p className="text-sm text-gray-500">Loading vendors...</p>
+                    ) : zoneVendors.length === 0 ? (
+                      <p className="text-sm text-gray-500">No vendors allocated to this zone.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {zoneVendors.map(vendor => (
+                          <div key={vendor.id} className="bg-white rounded-lg p-3 border">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <p className="font-bold text-gray-800">{vendor.name}</p>
+                                <p className="text-xs text-gray-500">{vendor.category}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs font-bold px-2 py-1 rounded ${
+                                  vendor.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                                }`}>
+                                  {vendor.status}
+                                </span>
+                                <button
+                                  onClick={() => navigate(`/vendors/${vendor.id}`)}
+                                  className="p-1.5 hover:bg-blue-100 rounded-full transition"
+                                  title="View Vendor Details"
+                                >
+                                  <Eye size={16} className="text-blue-600" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="mt-2 text-xs text-gray-500">
+                              <p>📞 {vendor.phone}</p>
+                              <p>📍 {vendor.latitude?.toFixed(6)}, {vendor.longitude?.toFixed(6)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Zone Location Details */}
                   <div className="bg-gray-50 rounded-xl p-4">
                     <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -1198,40 +1481,6 @@ const ZoneManagement = () => {
                       </div>
                     </div>
                   )}
-
-                  {/* Allocated Vendors */}
-                  <div className="bg-blue-50 rounded-xl p-4">
-                    <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
-                      <CheckCircle size={18} className="text-blue-600" /> Allocated Vendors
-                    </h3>
-                    {loadingVendors ? (
-                      <p className="text-sm text-gray-500">Loading vendors...</p>
-                    ) : zoneVendors.length === 0 ? (
-                      <p className="text-sm text-gray-500">No vendors allocated to this zone.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {zoneVendors.map(vendor => (
-                          <div key={vendor.id} className="bg-white rounded-lg p-3 border">
-                            <div className="flex justify-between items-start">
-                              <div>
-                                <p className="font-bold text-gray-800">{vendor.name}</p>
-                                <p className="text-xs text-gray-500">{vendor.category}</p>
-                              </div>
-                              <span className={`text-xs font-bold px-2 py-1 rounded ${
-                                vendor.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
-                              }`}>
-                                {vendor.status}
-                              </span>
-                            </div>
-                            <div className="mt-2 text-xs text-gray-500">
-                              <p>📞 {vendor.phone}</p>
-                              <p>📍 {vendor.latitude?.toFixed(6)}, {vendor.longitude?.toFixed(6)}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>

@@ -16,7 +16,8 @@ import java.time.LocalDateTime;
 @Table(name = "vendors", indexes = {
     @Index(name = "idx_vendor_id", columnList = "vendor_id"),
     @Index(name = "idx_vendor_status", columnList = "status"),
-    @Index(name = "idx_vendor_phone", columnList = "phone")
+    @Index(name = "idx_vendor_phone", columnList = "phone"),
+    @Index(name = "idx_vendor_email", columnList = "email")
 })
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Data
@@ -37,6 +38,9 @@ public class Vendor {
 
     @Column(nullable = false, length = 20)
     private String phone;
+
+    @Column(length = 100)
+    private String email;
 
     @Column(length = 500)
     private String aadhaar;
@@ -74,4 +78,39 @@ public class Vendor {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    // NEW: Warning count for violation tracking (max 3 warnings)
+    @Builder.Default
+    @Column(name = "warning_count")
+    private Integer warningCount = 0;
+
+    // NEW: Last warning date
+    @Column(name = "last_warning_date")
+    private LocalDateTime lastWarningDate;
+
+    /**
+     * Increment warning count and update last warning date
+     * @return new warning count
+     */
+    public int incrementWarning() {
+        this.warningCount = (this.warningCount == null ? 0 : this.warningCount) + 1;
+        this.lastWarningDate = LocalDateTime.now();
+        return this.warningCount;
+    }
+
+    /**
+     * Check if vendor has reached maximum warnings (3)
+     * @return true if 3 or more warnings
+     */
+    public boolean hasMaxWarnings() {
+        return this.warningCount != null && this.warningCount >= 3;
+    }
+
+    /**
+     * Reset warning count (e.g., after challan issued or periodic reset)
+     */
+    public void resetWarnings() {
+        this.warningCount = 0;
+        this.lastWarningDate = null;
+    }
 }

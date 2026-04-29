@@ -4,6 +4,7 @@ com\smc\svms\controller\ViolationStatistics.class
 com\smc\svms\entity\ViolationPattern$ViolationPatternBuilder.class
 com\smc\svms\service\ValidationResult.class
 com\smc\svms\algorithm\AdvancedGeofencingAlgorithms$ZoneCharacteristics.class
+com\smc\svms\entity\RentPayment$PaymentStatus.class
 com\smc\svms\enums\VendorCategory.class
 com\smc\svms\repository\VendorRepository.class
 com\smc\svms\dto\AdvancedLocationValidationResult.class
@@ -17,6 +18,7 @@ com\smc\svms\service\CitizenReportResult.class
 com\smc\svms\enums\ValidationType.class
 com\smc\svms\service\EnhancedJwtUtils.class
 com\smc\svms\config\JwtAuthenticationEntryPoint.class
+com\smc\svms\service\RentService$RentSummaryDTO.class
 com\smc\svms\service\SystemHealth.class
 com\smc\svms\enums\ChallanStatus.class
 com\smc\svms\entity\CitizenReport.class
@@ -95,6 +97,7 @@ com\smc\svms\enums\AlertStatus.class
 com\smc\svms\repository\AlertRepository.class
 com\smc\svms\repository\ChallanRepository.class
 com\smc\svms\service\CustomUserDetailsService.class
+com\smc\svms\dto\ScanRequest$ScannerType.class
 com\smc\svms\controller\JwtAuthenticationEntryPoint.class
 com\smc\svms\dto\ScanValidationResponse.class
 com\smc\svms\service\DynamicPricingService$1.class
@@ -108,6 +111,7 @@ com\smc\svms\service\SimpleAlertService.class
 com\smc\svms\dto\ScanValidationResponse$Builder.class
 com\smc\svms\dto\ZoneRequest.class
 com\smc\svms\service\SMSService.class
+com\smc\svms\service\RentService$RentSummaryDTO$RentSummaryDTOBuilder.class
 com\smc\svms\service\AlertService.class
 com\smc\svms\service\DashboardStatistics$Builder.class
 com\smc\svms\algorithm\AdvancedGeofencingAlgorithms$ContainmentType.class
@@ -127,6 +131,7 @@ com\smc\svms\exception\GlobalExceptionHandler.class
 com\smc\svms\repository\ZoneRepository.class
 com\smc\svms\dto\ValidationLayer$ValidationLayerBuilder.class
 com\smc\svms\controller\FileController.class
+com\smc\svms\controller\ResolveViolationRequest.class
 com\smc\svms\entity\Vendor.class
 com\smc\svms\service\DuplicateCheckResult$Builder.class
 com\smc\svms\controller\ViolationStatistics$Builder.class
@@ -136,6 +141,7 @@ com\smc\svms\algorithm\AdvancedGeofencingAlgorithms$AdaptiveAlgorithmSelector.cl
 com\smc\svms\service\LocationValidationService$LocationValidationResult.class
 com\smc\svms\service\ViolationStats$Builder.class
 com\smc\svms\controller\PaymentController.class
+com\smc\svms\controller\ViolationController$1.class
 com\smc\svms\service\RateLimitingFilter$RateLimitConfig.class
 com\smc\svms\service\EmailService.class
 com\smc\svms\service\ZoneStats.class
@@ -154,6 +160,7 @@ com\smc\svms\service\VendorService.class
 com\smc\svms\controller\AnalyticsController.class
 com\smc\svms\security\UserDetailsServiceImpl.class
 com\smc\svms\dto\ViolationRequest.class
+com\smc\svms\service\RentService.class
 com\smc\svms\dto\PaymentVerificationRequest.class
 com\smc\svms\service\ViolationServiceImpl.class
 com\smc\svms\entity\QrCode$QrCodeBuilder.class
@@ -185,6 +192,7 @@ com\smc\svms\algorithm\AdvancedGeofencingAlgorithms$RTreeIndexing.class
 com\smc\svms\dto\ZoneInfo.class
 com\smc\svms\service\DynamicPricingService$PricingBreakdown.class
 com\smc\svms\service\DynamicPricingService$BillingAdjustments$Builder.class
+com\smc\svms\dto\RentHistoryDTO$RentHistoryDTOBuilder.class
 com\smc\svms\entity\ZoneCategory.class
 com\smc\svms\entity\Zone$ZoneBuilder.class
 com\smc\svms\dto\VendorRequest.class
@@ -203,6 +211,7 @@ com\smc\svms\util\GeoUtils$1.class
 com\smc\svms\entity\LocalEvent.class
 com\smc\svms\service\RateLimitResult.class
 com\smc\svms\entity\ZonePricing$ZonePricingBuilder.class
+com\smc\svms\enums\ViolationAction.class
 com\smc\svms\service\LocationValidationService$LocationValidationResult$LocationValidationResultBuilder.class
 com\smc\svms\algorithm\AdvancedGeofencingAlgorithms$DistanceAlgorithm.class
 com\smc\svms\dto\StatusUpdateRequest.class
@@ -215,6 +224,7 @@ com\smc\svms\service\SystemHealth$Builder.class
 com\smc\svms\entity\ReportType.class
 com\smc\svms\SvmsApplication.class
 com\smc\svms\entity\AlertSeverity.class
+com\smc\svms\service\ViolationServiceImpl$1.class
 com\smc\svms\dto\PaymentOrderResponse.class
 com\smc\svms\service\ViolationStatistics.class
 com\smc\svms\controller\SecureScanController.class
@@ -248,6 +258,7 @@ com\smc\svms\service\RealTimeStats.class
 com\smc\svms\service\DynamicPricingService$MonthlyBill$Builder.class
 com\smc\svms\entity\Challan$ChallanBuilder.class
 com\smc\svms\service\DynamicPricingService$VendorPerformance$Builder.class
+com\smc\svms\dto\RentHistoryDTO.class
 com\smc\svms\algorithm\AdvancedGeofencingAlgorithms$GeodesicResult.class
 com\smc\svms\service\DynamicPricingService.class
 com\smc\svms\service\ZoneCapacity.class

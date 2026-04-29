@@ -613,11 +613,142 @@ public class EnhancedGeofencingService {
             }
             
             return true;
-            
+
         } catch (Exception e) {
             // Error validating zone boundary
             return false;
         }
+    }
+
+    /**
+     * Check if a new zone overlaps with any existing active zones
+     * Supports both circular and polygon zones
+     */
+    public boolean checkZoneOverlap(Zone newZone) {
+        try {
+            log.info("Checking overlap for zone: {} at ({}, {})", newZone.getName(), newZone.getLatitude(), newZone.getLongitude());
+            List<Zone> existingZones = zoneRepository.findAllActiveZones();
+            log.info("Found {} existing active zones", existingZones.size());
+
+            for (Zone existingZone : existingZones) {
+                // Skip if same zone (for updates)
+                if (newZone.getId() != null && newZone.getId().equals(existingZone.getId())) {
+                    continue;
+                }
+
+                log.info("Checking overlap with existing zone: {} at ({}, {})", existingZone.getName(), existingZone.getLatitude(), existingZone.getLongitude());
+                if (zonesOverlap(newZone, existingZone)) {
+                    log.warn("Zone '{}' overlaps with existing zone '{}'", newZone.getName(), existingZone.getName());
+                    return true;
+                }
+            }
+            log.info("No overlap detected for zone: {}", newZone.getName());
+            return false;
+        } catch (Exception e) {
+            log.error("Error checking zone overlap: {}", e.getMessage(), e);
+            // Return true to prevent creation if check fails (fail-secure)
+            return true;
+        }
+    }
+
+    /**
+     * Check if two zones overlap
+     * Handles circle-circle, polygon-polygon, and circle-polygon overlaps
+     */
+    private boolean zonesOverlap(Zone zone1, Zone zone2) {
+        // Both circular zones
+        if (!zone1.hasPolygon() && !zone2.hasPolygon()) {
+            return circularZonesOverlap(zone1, zone2);
+        }
+
+        // Both polygon zones
+        if (zone1.hasPolygon() && zone2.hasPolygon()) {
+            return polygonZonesOverlap(zone1, zone2);
+        }
+
+        // One circular, one polygon - check if circle center is inside polygon
+        // or if any polygon point is inside circle
+        if (zone1.hasPolygon()) {
+            return circlePolygonOverlap(zone2, zone1); // zone2 is circle, zone1 is polygon
+        } else {
+            return circlePolygonOverlap(zone1, zone2); // zone1 is circle, zone2 is polygon
+        }
+    }
+
+    /**
+     * Check if two circular zones overlap
+     */
+    private boolean circularZonesOverlap(Zone zone1, Zone zone2) {
+        double distance = calculateHaversineDistance(
+            zone1.getLatitude().doubleValue(), zone1.getLongitude().doubleValue(),
+            zone2.getLatitude().doubleValue(), zone2.getLongitude().doubleValue()
+        );
+
+        double radius1 = zone1.getRadiusMeters() != null ? zone1.getRadiusMeters() : 0;
+        double radius2 = zone2.getRadiusMeters() != null ? zone2.getRadiusMeters() : 0;
+
+        // Zones overlap if distance between centers is less than sum of radii
+        return distance < (radius1 + radius2);
+    }
+
+    /**
+     * Check if a circular zone overlaps with a polygon zone
+     */
+    private boolean circlePolygonOverlap(Zone circleZone, Zone polygonZone) {
+        // Get polygon coordinates
+        List<Map<String, Double>> polygonCoords = polygonZone.getPolygonCoordinatesList();
+        if (polygonCoords == null || polygonCoords.isEmpty()) {
+            return false;
+        }
+
+        double circleLat = circleZone.getLatitude().doubleValue();
+        double circleLng = circleZone.getLongitude().doubleValue();
+        double radius = circleZone.getRadiusMeters() != null ? circleZone.getRadiusMeters() : 0;
+
+        // Check if circle center is inside polygon
+        if (isPointInPolygon(circleLat, circleLng, polygonZone.getPolygonCoordinatesJson())) {
+            return true;
+        }
+
+        // Check if any polygon vertex is inside the circle
+        for (Map<String, Double> coord : polygonCoords) {
+            double pointLat = coord.get("latitude");
+            double pointLng = coord.get("longitude");
+            double distance = calculateHaversineDistance(circleLat, circleLng, pointLat, pointLng);
+            if (distance <= radius) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if two polygon zones overlap (simplified bounding box check)
+     */
+    private boolean polygonZonesOverlap(Zone zone1, Zone zone2) {
+        List<Map<String, Double>> coords1 = zone1.getPolygonCoordinatesList();
+        List<Map<String, Double>> coords2 = zone2.getPolygonCoordinatesList();
+
+        if (coords1 == null || coords2 == null) {
+            return false;
+        }
+
+        // Check if any point of zone1 is inside zone2
+        for (Map<String, Double> coord : coords1) {
+            if (isPointInPolygon(coord.get("latitude"), coord.get("longitude"), zone2.getPolygonCoordinatesJson())) {
+                return true;
+            }
+        }
+
+        // Check if any point of zone2 is inside zone1
+        for (Map<String, Double> coord : coords2) {
+            if (isPointInPolygon(coord.get("latitude"), coord.get("longitude"), zone1.getPolygonCoordinatesJson())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

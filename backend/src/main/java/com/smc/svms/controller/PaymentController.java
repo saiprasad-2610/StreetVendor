@@ -82,4 +82,15 @@ public class PaymentController {
             return ResponseEntity.badRequest().body("Failed to create test rent payment: " + e.getMessage());
         }
     }
+
+    @PostMapping("/rent-payments/generate-pending/{vendorId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OFFICER', 'VENDOR')")
+    public ResponseEntity<String> generatePendingRentPayments(@PathVariable Long vendorId) {
+        try {
+            paymentService.generatePendingRentPayments(vendorId);
+            return ResponseEntity.ok("Pending rent payments generated successfully");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Failed to generate pending rent payments: " + e.getMessage());
+        }
+    }
 }

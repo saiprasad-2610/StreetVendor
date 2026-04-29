@@ -78,7 +78,7 @@ public class Violation {
     private LocalDateTime capturedAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "validation_status", nullable = false, length = 20)
+    @Column(name = "validation_status", nullable = false, length = 30)
     private com.smc.svms.enums.ValidationStatus validationStatus = com.smc.svms.enums.ValidationStatus.PENDING;
 
     @CreationTimestamp
@@ -147,7 +147,54 @@ public class Violation {
     
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-    
+
+    // NEW: Resolution fields for violation review workflow
+    @Enumerated(EnumType.STRING)
+    @Column(name = "resolution_action", length = 20)
+    private com.smc.svms.enums.ViolationAction resolutionAction;
+
+    @Column(name = "resolution_notes", columnDefinition = "TEXT")
+    private String resolutionNotes;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "resolved_by")
+    @JsonIgnoreProperties({"password", "roles", "createdAt", "updatedAt"})
+    private User resolvedBy;
+
+    @Column(name = "resolved_at")
+    private LocalDateTime resolvedAt;
+
+    @Column(name = "challan_issued")
+    private Boolean challanIssued = false;
+
+    @Column(name = "warning_number")
+    private Integer warningNumber;
+
+    public com.smc.svms.enums.ViolationAction getResolutionAction() { return resolutionAction; }
+    public void setResolutionAction(com.smc.svms.enums.ViolationAction resolutionAction) { this.resolutionAction = resolutionAction; }
+
+    public String getResolutionNotes() { return resolutionNotes; }
+    public void setResolutionNotes(String resolutionNotes) { this.resolutionNotes = resolutionNotes; }
+
+    public User getResolvedBy() { return resolvedBy; }
+    public void setResolvedBy(User resolvedBy) { this.resolvedBy = resolvedBy; }
+
+    public LocalDateTime getResolvedAt() { return resolvedAt; }
+    public void setResolvedAt(LocalDateTime resolvedAt) { this.resolvedAt = resolvedAt; }
+
+    public Boolean getChallanIssued() { return challanIssued; }
+    public void setChallanIssued(Boolean challanIssued) { this.challanIssued = challanIssued; }
+
+    public Integer getWarningNumber() { return warningNumber; }
+    public void setWarningNumber(Integer warningNumber) { this.warningNumber = warningNumber; }
+
+    /**
+     * Check if violation has been resolved
+     */
+    public boolean isResolved() {
+        return this.resolvedAt != null || this.resolutionAction != null;
+    }
+
     // Static builder method
     public static Builder builder() {
         return new Builder();

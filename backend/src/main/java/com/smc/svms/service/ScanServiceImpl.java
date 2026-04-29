@@ -22,6 +22,7 @@ public class ScanServiceImpl implements ScanService {
     private final VendorRepository vendorRepository;
     private final ChallanService challanService;
     private final ReverseGeocodingUtil reverseGeocodingUtil;
+    private final BasicViolationDetectionService violationDetectionService;
 
     @Value("${app.location.threshold-meters}")
     private double thresholdMeters;
@@ -55,43 +56,31 @@ public class ScanServiceImpl implements ScanService {
         String algorithmUsed = "HAVERSINE";
         double confidence = 1.0;
         
+        // DEBUG: Log coordinates for troubleshooting
+        double scanLat = request.getLatitude();
+        double scanLon = request.getLongitude();
+        double vendorLat = vendor.getLocation().getLatitude().doubleValue();
+        double vendorLon = vendor.getLocation().getLongitude().doubleValue();
+        log.info("DEBUG SCAN: Scan Location: ({}, {}), Vendor Location: ({}, {}), Vendor: {}",
+                 scanLat, scanLon, vendorLat, vendorLon, vendor.getVendorId());
+
         // Use advanced algorithms if enabled
         if (useAdvancedAlgorithms) {
-            // Select optimal algorithm based on distance and GPS accuracy
-            if (request.getGpsAccuracy() != null && request.getGpsAccuracy() > 50) {
-                // Poor GPS - use Vincenty for maximum accuracy
-                AdvancedGeofencingAlgorithms.GeodesicResult vincentyResult = 
-                    AdvancedGeofencingAlgorithms.VincentyDistance.calculateDistance(
-                        request.getLatitude(),
-                        request.getLongitude(),
-                        vendor.getLocation().getLatitude().doubleValue(),
-                        vendor.getLocation().getLongitude().doubleValue()
-                    );
-                distance = vincentyResult.getDistance();
-                algorithmUsed = "VINCENTY";
-            } else if (request.getGpsAccuracy() != null && request.getGpsAccuracy() < 5) {
-                // Excellent GPS - use Fast Euclidean for speed
-                distance = AdvancedGeofencingAlgorithms.FastEuclidean.calculateDistance(
-                    request.getLatitude(),
-                    request.getLongitude(),
-                    vendor.getLocation().getLatitude().doubleValue(),
-                    vendor.getLocation().getLongitude().doubleValue()
-                );
-                algorithmUsed = "FAST_EUCLIDEAN";
-            } else {
-                // Good GPS - use Improved Haversine for balance
-                distance = AdvancedGeofencingAlgorithms.ImprovedHaversine.calculateDistance(
-                    request.getLatitude(),
-                    request.getLongitude(),
-                    vendor.getLocation().getLatitude().doubleValue(),
-                    vendor.getLocation().getLongitude().doubleValue()
-                );
-                algorithmUsed = "IMPROVED_HAVERSINE";
-            }
+            // Always use Improved Haversine - it's accurate (99%) and reliable for all distances
+            // Vincenty has numerical precision issues with short distances (< 100m)
+            distance = AdvancedGeofencingAlgorithms.ImprovedHaversine.calculateDistance(
+                scanLat, scanLon, vendorLat, vendorLon
+            );
+            log.info("DEBUG SCAN: Calculated distance: {} meters ({} feet)", distance, distance * 3.281);
+            algorithmUsed = "IMPROVED_HAVERSINE";
             
             // Calculate confidence based on GPS accuracy
             confidence = calculateConfidence(request.getGpsAccuracy(), distance);
         } else {
+            // Default scanner type for backward compatibility
+            if (request.getScannerType() == null) {
+                request.setScannerType(ScanRequest.ScannerType.PUBLIC_USER);
+            }
             // Use legacy Haversine
             distance = GeoUtils.calculateDistance(
                 request.getLatitude(),
@@ -101,24 +90,48 @@ public class ScanServiceImpl implements ScanService {
             );
         }
 
-        // Calculate adaptive threshold based on GPS accuracy
-        double adaptiveThreshold = calculateAdaptiveThreshold(request.getGpsAccuracy(), distance);
+        // Use FIXED threshold - strict 4 meter rule regardless of GPS accuracy
+        // This ensures consistent violation detection
+        double fixedThreshold = thresholdMeters;
 
-        ValidationStatus status = distance <= adaptiveThreshold ? ValidationStatus.VALID : ValidationStatus.INVALID;
-        String message = generateValidationMessage(status, distance, adaptiveThreshold, request.getGpsAccuracy(), detectedCity, algorithmUsed, confidence);
+        ValidationStatus status = distance <= fixedThreshold ? ValidationStatus.VALID : ValidationStatus.INVALID;
+        String message = generateValidationMessage(status, distance, fixedThreshold, request.getGpsAccuracy(), detectedCity, algorithmUsed, confidence);
 
-        // If location is invalid, issue an automatic challan
-        // Only issue if confidence is high enough to avoid false positives
+        // If location is invalid, determine action based on scanner type
+        // CRITICAL FRAUD PREVENTION: Only auto-issue challans for authenticated enforcement officers
         if (status == ValidationStatus.INVALID && confidence >= 0.7) {
             String locationStr = String.format("%.4f, %.4f", request.getLatitude(), request.getLongitude());
             String cityInfo = detectedCity != null ? " (Detected: " + detectedCity + ")" : "";
             String algorithmInfo = useAdvancedAlgorithms ? " (Algorithm: " + algorithmUsed + ", Confidence: " + String.format("%.1f%%", confidence * 100) + ")" : "";
-            challanService.issueAutomaticChallan(
-                vendor,
-                "Location Mismatch: Vendor found at " + locationStr + cityInfo + " instead of registered location" + algorithmInfo,
-                locationStr,
-                request.getImageProofUrl()
-            );
+            
+            // FRAUD PREVENTION: Check who is scanning
+            if (request.isEnforcementOfficer()) {
+                // ✅ Authenticated officer scan - Safe to auto-issue challan
+                log.info("Auto-issuing challan for vendor {} - scanned by enforcement officer {}", 
+                        vendor.getVendorId(), request.getScannerId());
+                // Convert distance to feet for challan message
+                double distanceFeet = distance * 3.281;
+                challanService.issueAutomaticChallan(
+                    vendor,
+                    "Location Mismatch: Vendor found at " + locationStr + cityInfo + " instead of registered location" + algorithmInfo + " [Officer: " + request.getScannerName() + ", Distance: " + String.format("%.1fft", distanceFeet) + "]",
+                    locationStr,
+                    request.getImageProofUrl()
+                );
+            } else if (request.isVendorSelfScan()) {
+                // ⚠️ Vendor scanning their own QR code but at wrong location
+                // Don't auto-issue challan - vendor can't frame themselves
+                log.warn("Vendor {} self-scan shows location mismatch. Creating pending review instead of auto-challan.", 
+                        vendor.getVendorId());
+                createPendingReviewViolation(vendor, request, locationStr, cityInfo, distance, "Vendor self-scan outside registered location");
+            } else {
+                // 🚨 PUBLIC USER SCAN - HIGH FRAUD RISK
+                // Sham can photograph Ram's QR, go elsewhere, scan it, and frame Ram
+                // Solution: Create PENDING REVIEW violation, NOT auto-challan
+                log.warn("Public/anonymous scan detected location mismatch for vendor {}. Creating PENDING REVIEW instead of auto-challan to prevent fraud.", 
+                        vendor.getVendorId());
+                createPendingReviewViolation(vendor, request, locationStr, cityInfo, distance, 
+                    "Public reported location mismatch (PENDING REVIEW - Possible fraud attempt)");
+            }
         } else if (status == ValidationStatus.INVALID && confidence < 0.7) {
             log.warn("Skipping challan for vendor {} due to low confidence ({:.1f%})", 
                      vendor.getVendorId(), confidence);
@@ -200,19 +213,63 @@ public class ScanServiceImpl implements ScanService {
     }
     
     /**
+     * Create a pending review violation for public/vendor scans with location mismatch
+     * This prevents fraudulent challans from malicious third-party scans
+     */
+    private void createPendingReviewViolation(Vendor vendor, ScanRequest request, String locationStr, 
+                                               String cityInfo, double distance, String reason) {
+        try {
+            // Convert distance to feet for violation description
+            double distanceFeet = distance * 3.281;
+            String description = String.format(
+                "%s - Distance: %.1fft from registered location. Scanner: %s (Type: %s). Location: %s%s. Device: %s",
+                reason,
+                distanceFeet,
+                request.getScannerName() != null ? request.getScannerName() : "Anonymous",
+                request.getScannerType() != null ? request.getScannerType() : "UNKNOWN",
+                locationStr,
+                cityInfo,
+                request.getDeviceId() != null ? request.getDeviceId() : "Unknown"
+            );
+            
+            violationDetectionService.createViolationFromCitizenReport(
+                vendor.getId(),
+                "LOCATION_VIOLATION",
+                description,
+                request.getScannerName() != null ? request.getScannerName() : "Public User",
+                request.getDeviceId() != null ? request.getDeviceId() : "Unknown",
+                request.getImageProofUrl()
+            );
+            
+            log.info("Created pending review violation for vendor {} due to {} scan at mismatched location", 
+                    vendor.getVendorId(), 
+                    request.getScannerType() != null ? request.getScannerType() : "unknown");
+                    
+        } catch (Exception e) {
+            log.error("Failed to create pending review violation for vendor {}", vendor.getVendorId(), e);
+        }
+    }
+
+    /**
      * Generate validation message with GPS accuracy, city, algorithm, and confidence information
+     * All distances converted to feet for display
      */
     private String generateValidationMessage(ValidationStatus status, double distance, double threshold, 
                                            Double gpsAccuracy, String detectedCity, String algorithmUsed, double confidence) {
         String cityInfo = detectedCity != null ? " (Location: " + detectedCity + ")" : "";
         String algorithmInfo = " (Algorithm: " + algorithmUsed + ", Confidence: " + String.format("%.1f%%", confidence * 100) + ")";
         
+        // Convert meters to feet (1 meter = 3.281 feet)
+        double distanceFeet = distance * 3.281;
+        double thresholdFeet = threshold * 3.281;
+        double gpsAccuracyFeet = gpsAccuracy != null ? gpsAccuracy * 3.281 : 0;
+        
         if (status == ValidationStatus.VALID) {
-            return String.format("Vendor is in correct location%s. (Distance: %.1fm, GPS Accuracy: ±%.1fm)%s",
-                    cityInfo, distance, gpsAccuracy != null ? gpsAccuracy : 0, algorithmInfo);
+            return String.format("Vendor is in correct location%s. (Distance: %.1fft, GPS Accuracy: ±%.1fft)%s",
+                    cityInfo, distanceFeet, gpsAccuracyFeet, algorithmInfo);
         } else {
-            return String.format("Vendor is outside designated area%s (Distance: %.1fm, Threshold: %.1fm, GPS Accuracy: ±%.1fm)%s",
-                    cityInfo, distance, threshold, gpsAccuracy != null ? gpsAccuracy : 0, algorithmInfo);
+            return String.format("Vendor is outside designated area%s (Distance: %.1fft, Threshold: %.1fft, GPS Accuracy: ±%.1fft)%s",
+                    cityInfo, distanceFeet, thresholdFeet, gpsAccuracyFeet, algorithmInfo);
         }
     }
 }

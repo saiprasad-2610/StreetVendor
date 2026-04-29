@@ -15,6 +15,7 @@ import java.util.Optional;
 public interface VendorRepository extends JpaRepository<Vendor, Long> {
     Optional<Vendor> findByVendorId(String vendorId);
     Optional<Vendor> findByCreatedByUsername(String username);
+    Optional<Vendor> findByCreatedBy(com.smc.svms.entity.User user);
     List<Vendor> findByStatus(VendorStatus status);
     boolean existsByVendorId(String vendorId);
     long countByStatus(VendorStatus status);

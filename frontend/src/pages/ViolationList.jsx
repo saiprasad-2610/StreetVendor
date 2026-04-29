@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { AlertTriangle, Clock, MapPin, CheckCircle2, XCircle, Info, X, User, UserCheck, FileText, CameraOff, Map } from 'lucide-react';
+import { AlertTriangle, Clock, MapPin, CheckCircle2, XCircle, Info, X, User, UserCheck, FileText, CameraOff, Map, ChevronLeft, ChevronRight, ZoomIn } from 'lucide-react';
 import { GoogleMap, Marker, useJsApiLoader, Polyline, Circle, Polygon } from '@react-google-maps/api';
 
 const ViolationList = () => {
@@ -13,6 +13,8 @@ const ViolationList = () => {
   const [loadingVendor, setLoadingVendor] = useState(false);
   const [loadingZone, setLoadingZone] = useState(false);
   const [challans, setChallans] = useState([]);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -91,7 +93,58 @@ const ViolationList = () => {
     return hasChallan;
   };
 
+  const resolveViolation = async (violation, action) => {
+    const actionLabels = {
+      'ISSUE_CHALLAN': 'issue a challan (₹500 fine)',
+      'ISSUE_WARNING': `issue Warning #${(violation.vendor?.warningCount || 0) + 1} (max 3 warnings)`,
+      'NO_ACTION': 'mark this violation as FAKE/INVALID and dismiss it'
+    };
+
+    if (!window.confirm(`Are you sure you want to ${actionLabels[action]} for vendor ${violation.vendor.name}?`)) return;
+
+    setLoading(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const response = await axios.post(
+        `/api/violations/${violation.id}/resolve`,
+        {
+          action: action,
+          notes: action === 'NO_ACTION' ? 'Marked as fake/invalid violation' :
+                 action === 'ISSUE_WARNING' ? `Warning #${(violation.vendor?.warningCount || 0) + 1} issued` :
+                 'Challan issued for location violation'
+        },
+        {
+          headers: {
+            'X-User-ID': user.id || 1
+          }
+        }
+      );
+
+      // Refresh violations list
+      await fetchViolations();
+
+      // Show success message
+      const messages = {
+        'ISSUE_CHALLAN': 'Challan issued successfully!',
+        'ISSUE_WARNING': `Warning #${response.data?.data?.warningNumber} sent to vendor's account!`,
+        'NO_ACTION': 'Violation marked as fake and dismissed.'
+      };
+      alert(messages[action]);
+
+    } catch (err) {
+      console.error('Failed to resolve violation:', err);
+      alert('Failed to resolve violation: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Legacy function - keeping for backward compatibility, but using resolveViolation internally
   const handleIssueChallan = async (v) => {
+    await resolveViolation(v, 'ISSUE_CHALLAN');
+  };
+
+  const handleIssueChallanOld = async (v) => {
     if (!window.confirm(`Issue a fine of ₹500 to ${v.vendor.name}?`)) return;
 
     try {
@@ -210,6 +263,7 @@ const ViolationList = () => {
   const openDetails = async (v) => {
     setSelectedViolation(v);
     setShowDetailModal(true);
+    setActiveImageIndex(0); // Reset to first image
     setVendorDetails(null);
     setZoneDetails(null);
     setLoadingVendor(true);
@@ -268,9 +322,39 @@ const ViolationList = () => {
           violations.map(violation => (
             <div key={violation.id} className="bg-white rounded-xl shadow-md overflow-hidden border border-gray-100 hover:shadow-lg transition flex flex-col">
               <div className="h-48 bg-gray-200 relative group cursor-pointer" onClick={() => openDetails(violation)}>
-                {violation.imageProofUrl ? (
-                  <img src={violation.imageProofUrl} alt="Violation Proof" className="w-full h-full object-cover" />
-                ) : (
+                {violation.imageProofUrl ? (() => {
+                  // Parse image URLs to count photos
+                  let photoCount = 1;
+                  try {
+                    if (violation.imageProofUrl.startsWith('[')) {
+                      const urls = JSON.parse(violation.imageProofUrl);
+                      photoCount = urls.length;
+                    }
+                  } catch (e) {
+                    photoCount = 1;
+                  }
+                  // Get first image URL for display
+                  let displayUrl = violation.imageProofUrl;
+                  try {
+                    if (violation.imageProofUrl.startsWith('[')) {
+                      const urls = JSON.parse(violation.imageProofUrl);
+                      displayUrl = urls[0];
+                    }
+                  } catch (e) {
+                    displayUrl = violation.imageProofUrl;
+                  }
+                  return (
+                    <>
+                      <img src={displayUrl} alt="Violation Proof" className="w-full h-full object-cover" />
+                      {photoCount > 1 && (
+                        <div className="absolute top-3 left-3 bg-blue-600 text-white px-2 py-1 rounded-lg text-xs font-bold shadow-md flex items-center gap-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                          {photoCount} Photos
+                        </div>
+                      )}
+                    </>
+                  );
+                })() : (
                   <div className="w-full h-full flex items-center justify-center text-gray-400">
                     No Image Proof
                   </div>
@@ -327,25 +411,61 @@ const ViolationList = () => {
                   "{violation.description || 'No description provided'}"
                 </div>
 
-                <div className="pt-4 flex gap-3 mt-auto">
+                <div className="pt-4 flex gap-2 mt-auto flex-wrap">
                   <button
                     onClick={() => openDetails(violation)}
-                    className="flex-1 bg-smc-blue text-white py-2.5 rounded-lg text-sm font-bold hover:bg-blue-800 transition flex items-center justify-center gap-2"
+                    className="flex-1 bg-smc-blue text-white py-2 rounded-lg text-sm font-bold hover:bg-blue-800 transition flex items-center justify-center gap-2 min-w-[80px]"
                   >
-                    <Info size={16} /> Details
+                    <Info size={14} /> Details
                   </button>
-                  {violation.validationStatus === 'VALID' && !hasChallanForViolation(violation) && (
-                    <button
-                      onClick={() => handleIssueChallan(violation)}
-                      className="flex-1 bg-red-500 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-red-600 transition"
-                    >
-                      Issue Challan
-                    </button>
-                  )}
-                  {hasChallanForViolation(violation) && (
-                    <div className="flex-1 bg-green-100 text-green-700 py-2.5 rounded-lg text-sm font-bold flex items-center justify-center gap-2">
-                      <CheckCircle2 size={16} /> Challan Issued
+
+                  {/* Show resolution status for already resolved violations */}
+                  {violation.resolvedAt && (
+                    <div className={`flex-1 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 min-w-[100px] ${
+                      violation.resolutionAction === 'ISSUE_CHALLAN' ? 'bg-red-100 text-red-700' :
+                      violation.resolutionAction === 'ISSUE_WARNING' ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>
+                      {violation.resolutionAction === 'ISSUE_CHALLAN' && <><CheckCircle2 size={14} /> Challan Issued</>}
+                      {violation.resolutionAction === 'ISSUE_WARNING' && <><AlertTriangle size={14} /> Warning #{violation.warningNumber}</>}
+                      {violation.resolutionAction === 'NO_ACTION' && <><XCircle size={14} /> Dismissed</>}
                     </div>
+                  )}
+
+                  {/* Show action buttons for pending violations */}
+                  {!violation.resolvedAt && (
+                    <>
+                      {/* Warning Button - shows current warning count */}
+                      <button
+                        onClick={() => resolveViolation(violation, 'ISSUE_WARNING')}
+                        disabled={loading}
+                        className="flex-1 bg-yellow-500 text-white py-2 rounded-lg text-sm font-bold hover:bg-yellow-600 transition flex items-center justify-center gap-1 min-w-[80px] disabled:opacity-50"
+                        title={`Issue Warning #${(violation.vendor?.warningCount || 0) + 1} (Max 3)`}
+                      >
+                        <AlertTriangle size={14} />
+                        Warn #{violation.vendor?.warningCount || 0}/3
+                      </button>
+
+                      {/* Issue Challan Button */}
+                      <button
+                        onClick={() => resolveViolation(violation, 'ISSUE_CHALLAN')}
+                        disabled={loading}
+                        className="flex-1 bg-red-500 text-white py-2 rounded-lg text-sm font-bold hover:bg-red-600 transition flex items-center justify-center gap-1 min-w-[80px] disabled:opacity-50"
+                        title="Issue ₹500 Challan"
+                      >
+                        <FileText size={14} /> Fine ₹500
+                      </button>
+
+                      {/* No Action / Fake Button */}
+                      <button
+                        onClick={() => resolveViolation(violation, 'NO_ACTION')}
+                        disabled={loading}
+                        className="flex-1 bg-gray-500 text-white py-2 rounded-lg text-sm font-bold hover:bg-gray-600 transition flex items-center justify-center gap-1 min-w-[80px] disabled:opacity-50"
+                        title="Mark as Fake/Invalid"
+                      >
+                        <XCircle size={14} /> Fake
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -409,12 +529,102 @@ const ViolationList = () => {
                 )}
               </div>
 
-              {/* Evidence Image */}
-              <div className="rounded-2xl overflow-hidden border-2 border-gray-200 shadow-lg bg-white">
-                {selectedViolation.imageProofUrl ? (
-                  <img src={selectedViolation.imageProofUrl} alt="Full Evidence" className="w-full h-auto max-h-96 object-cover" />
-                ) : (
-                  <div className="h-64 bg-gradient-to-br from-gray-100 to-gray-200 flex flex-col items-center justify-center text-gray-400">
+              {/* Evidence Images Gallery */}
+              <div className="space-y-4">
+                {selectedViolation.imageProofUrl ? (() => {
+                  // Parse image URLs - handle both single URL and JSON array
+                  let imageUrls = [];
+                  try {
+                    if (selectedViolation.imageProofUrl.startsWith('[')) {
+                      // JSON array format
+                      imageUrls = JSON.parse(selectedViolation.imageProofUrl);
+                    } else {
+                      // Single URL format (backward compatibility)
+                      imageUrls = [selectedViolation.imageProofUrl];
+                    }
+                  } catch (e) {
+                    // Fallback to single URL if parsing fails
+                    imageUrls = [selectedViolation.imageProofUrl];
+                  }
+                  
+                  return (
+                    <div className="space-y-4">
+                      {/* Main large image with navigation */}
+                      <div className="relative rounded-2xl overflow-hidden border-2 border-gray-200 shadow-lg bg-white group">
+                        <img 
+                          src={imageUrls[activeImageIndex]} 
+                          alt={`Evidence Photo ${activeImageIndex + 1}`} 
+                          className="w-full h-auto max-h-[500px] object-cover cursor-zoom-in"
+                          onClick={() => setLightboxOpen(true)}
+                        />
+                        
+                        {/* Image counter badge */}
+                        <div className="absolute top-4 right-4 bg-black/70 text-white px-3 py-1.5 rounded-full text-sm font-bold backdrop-blur-sm">
+                          {activeImageIndex + 1} / {imageUrls.length}
+                        </div>
+                        
+                        {/* Zoom hint */}
+                        <div className="absolute bottom-4 right-4 bg-black/50 text-white px-3 py-1.5 rounded-full text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm flex items-center gap-1">
+                          <ZoomIn size={14} /> Click to zoom
+                        </div>
+                        
+                        {/* Navigation arrows */}
+                        {imageUrls.length > 1 && (
+                          <>
+                            <button
+                              onClick={() => setActiveImageIndex(prev => prev === 0 ? imageUrls.length - 1 : prev - 1)}
+                              className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all hover:scale-110"
+                            >
+                              <ChevronLeft size={24} />
+                            </button>
+                            <button
+                              onClick={() => setActiveImageIndex(prev => prev === imageUrls.length - 1 ? 0 : prev + 1)}
+                              className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all hover:scale-110"
+                            >
+                              <ChevronRight size={24} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      
+                      {/* Thumbnail gallery */}
+                      <div className="space-y-2">
+                        <p className="text-sm font-bold text-gray-600 flex items-center gap-2">
+                          <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs">📸</span>
+                          {imageUrls.length} Photos Evidence
+                        </p>
+                        <div className="grid grid-cols-4 gap-3">
+                          {imageUrls.map((url, index) => (
+                            <div 
+                              key={index} 
+                              onClick={() => setActiveImageIndex(index)}
+                              className={`relative rounded-xl overflow-hidden shadow-sm aspect-square cursor-pointer transition-all hover:scale-105 ${
+                                index === activeImageIndex 
+                                  ? 'ring-3 ring-blue-500 ring-offset-2 border-2 border-blue-500' 
+                                  : 'border-2 border-gray-200 hover:border-blue-400 opacity-70 hover:opacity-100'
+                              }`}
+                            >
+                              <img 
+                                src={url} 
+                                alt={`Evidence Photo ${index + 1}`}
+                                className="w-full h-full object-cover"
+                              />
+                              <div className={`absolute top-1 left-1 text-white text-xs font-bold px-2 py-1 rounded ${
+                                index === activeImageIndex ? 'bg-blue-600' : 'bg-black/60'
+                              }`}>
+                                #{index + 1}
+                              </div>
+                              {index === activeImageIndex && (
+                                <div className="absolute inset-0 bg-blue-500/10"></div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })() : (
+                  <div className="h-64 bg-gradient-to-br from-gray-100 to-gray-200 flex flex-col items-center justify-center text-gray-400 rounded-2xl border-2 border-gray-200">
                     <CameraOff size={48} className="mb-2" />
                     <p className="italic">No photo evidence attached</p>
                   </div>
@@ -433,6 +643,53 @@ const ViolationList = () => {
                   </div>
                   <p className="font-bold text-lg text-gray-900">{selectedViolation.vendor.name}</p>
                   <p className="text-sm text-blue-600 font-mono mt-1">{selectedViolation.vendor.vendorId}</p>
+                </div>
+
+                {/* Warning History Card */}
+                <div className={`p-5 rounded-2xl border shadow-sm hover:shadow-md transition ${
+                  (selectedViolation.vendor?.warningCount || 0) >= 3 ? 'bg-red-50 border-red-200' :
+                  (selectedViolation.vendor?.warningCount || 0) >= 2 ? 'bg-orange-50 border-orange-200' :
+                  (selectedViolation.vendor?.warningCount || 0) >= 1 ? 'bg-yellow-50 border-yellow-200' :
+                  'bg-green-50 border-green-200'
+                }`}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`p-2 rounded-lg ${
+                      (selectedViolation.vendor?.warningCount || 0) >= 3 ? 'bg-red-100' :
+                      (selectedViolation.vendor?.warningCount || 0) >= 2 ? 'bg-orange-100' :
+                      (selectedViolation.vendor?.warningCount || 0) >= 1 ? 'bg-yellow-100' :
+                      'bg-green-100'
+                    }`}>
+                      <AlertTriangle size={20} className={
+                        (selectedViolation.vendor?.warningCount || 0) >= 3 ? 'text-red-600' :
+                        (selectedViolation.vendor?.warningCount || 0) >= 2 ? 'text-orange-600' :
+                        (selectedViolation.vendor?.warningCount || 0) >= 1 ? 'text-yellow-600' :
+                        'text-green-600'
+                      } />
+                    </div>
+                    <p className="text-xs font-bold text-gray-400 uppercase">Warnings</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-3xl font-bold ${
+                      (selectedViolation.vendor?.warningCount || 0) >= 3 ? 'text-red-600' :
+                      (selectedViolation.vendor?.warningCount || 0) >= 2 ? 'text-orange-600' :
+                      (selectedViolation.vendor?.warningCount || 0) >= 1 ? 'text-yellow-600' :
+                      'text-green-600'
+                    }`}>
+                      {selectedViolation.vendor?.warningCount || 0}
+                    </span>
+                    <span className="text-gray-500">/ 3</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {(selectedViolation.vendor?.warningCount || 0) === 0 && "No warnings issued yet"}
+                    {(selectedViolation.vendor?.warningCount || 0) === 1 && "First warning issued"}
+                    {(selectedViolation.vendor?.warningCount || 0) === 2 && "Second warning - one more and challan will be issued"}
+                    {(selectedViolation.vendor?.warningCount || 0) >= 3 && "⚠️ Maximum warnings reached!"}
+                  </p>
+                  {selectedViolation.vendor?.lastWarningDate && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Last warning: {new Date(selectedViolation.vendor.lastWarningDate).toLocaleDateString()}
+                    </p>
+                  )}
                 </div>
 
                 {/* Location Card */}
@@ -617,28 +874,67 @@ const ViolationList = () => {
             </div>
 
             {/* Footer Actions */}
-            <div className="p-6 border-t bg-white flex gap-4">
+            <div className="p-6 border-t bg-white flex gap-3 flex-wrap">
               <button
                 onClick={() => setShowDetailModal(false)}
-                className="flex-1 px-6 py-3 border-2 border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-100 transition flex items-center justify-center gap-2"
+                className="px-6 py-3 border-2 border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-100 transition flex items-center justify-center gap-2"
               >
                 <X size={18} /> Close
               </button>
-              {selectedViolation.validationStatus === 'VALID' && !hasChallanForViolation(selectedViolation) && (
-                <button
-                  onClick={() => {
-                    handleIssueChallan(selectedViolation);
-                    setShowDetailModal(false);
-                  }}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition shadow-lg flex items-center justify-center gap-2"
-                >
-                  <AlertTriangle size={18} /> Issue ₹500 Fine
-                </button>
-              )}
-              {hasChallanForViolation(selectedViolation) && (
-                <div className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg">
-                  <CheckCircle2 size={18} /> Challan Already Issued
+
+              {/* Show resolution status for already resolved violations */}
+              {selectedViolation.resolvedAt && (
+                <div className={`flex-1 px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg ${
+                  selectedViolation.resolutionAction === 'ISSUE_CHALLAN' ? 'bg-gradient-to-r from-green-500 to-green-600 text-white' :
+                  selectedViolation.resolutionAction === 'ISSUE_WARNING' ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white' :
+                  'bg-gradient-to-r from-gray-500 to-gray-600 text-white'
+                }`}>
+                  {selectedViolation.resolutionAction === 'ISSUE_CHALLAN' && <><CheckCircle2 size={18} /> Challan Issued</>}
+                  {selectedViolation.resolutionAction === 'ISSUE_WARNING' && <><AlertTriangle size={18} /> Warning #{selectedViolation.warningNumber} Sent</>}
+                  {selectedViolation.resolutionAction === 'NO_ACTION' && <><XCircle size={18} /> Dismissed as Fake</>}
                 </div>
+              )}
+
+              {/* Show action buttons for pending violations */}
+              {!selectedViolation.resolvedAt && (
+                <>
+                  {/* Warning Button */}
+                  <button
+                    onClick={() => {
+                      resolveViolation(selectedViolation, 'ISSUE_WARNING');
+                      setShowDetailModal(false);
+                    }}
+                    disabled={loading}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white rounded-xl font-bold hover:from-yellow-600 hover:to-yellow-700 transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <AlertTriangle size={18} /> Warning #{selectedViolation.vendor?.warningCount || 0}/3
+                  </button>
+
+                  {/* Issue Challan Button */}
+                  <button
+                    onClick={() => {
+                      resolveViolation(selectedViolation, 'ISSUE_CHALLAN');
+                      setShowDetailModal(false);
+                    }}
+                    disabled={loading}
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl font-bold hover:from-red-700 hover:to-red-800 transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <FileText size={18} /> Issue ₹500 Fine
+                  </button>
+
+                  {/* No Action / Fake Button */}
+                  <button
+                    onClick={() => {
+                      resolveViolation(selectedViolation, 'NO_ACTION');
+                      setShowDetailModal(false);
+                    }}
+                    disabled={loading}
+                    className="px-6 py-3 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-xl font-bold hover:from-gray-600 hover:to-gray-700 transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                    title="Mark as Fake/Invalid"
+                  >
+                    <XCircle size={18} /> Fake
+                  </button>
+                </>
               )}
             </div>
           </div>

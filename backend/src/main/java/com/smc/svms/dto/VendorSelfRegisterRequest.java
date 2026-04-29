@@ -16,7 +16,9 @@ public class VendorSelfRegisterRequest {
     
     @NotBlank(message = "Phone is required")
     private String phone;
-    
+
+    private String email;
+
     @NotBlank(message = "Aadhaar is required")
     private String aadhaar;
     
@@ -51,6 +53,9 @@ public class VendorSelfRegisterRequest {
 
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
     public String getAadhaar() { return aadhaar; }
     public void setAadhaar(String aadhaar) { this.aadhaar = aadhaar; }

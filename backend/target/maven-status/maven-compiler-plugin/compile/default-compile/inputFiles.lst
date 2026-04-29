@@ -95,12 +95,14 @@ D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\EventType.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\RateLimitingFilter.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\controller\ViolationController.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\RealTimeStats.java
+D:\StreetVendor\backend\src\main\java\com\smc\svms\service\RentService.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\ViolationServiceImpl.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\Challan.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\ValidationResult.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\enums\VendorCategory.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\entity\Alert.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\controller\AnalyticsController.java
+D:\StreetVendor\backend\src\main\java\com\smc\svms\enums\ViolationAction.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\DashboardStatistics.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\VendorCategory.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\ValidationResult.java
@@ -153,3 +155,4 @@ D:\StreetVendor\backend\src\main\java\com\smc\svms\service\DuplicateCheckResult.
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\ZoneCapacity.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\ScanValidationResponse.java
 D:\StreetVendor\backend\src\main\java\com\smc\svms\service\SystemHealth.java
+D:\StreetVendor\backend\src\main\java\com\smc\svms\dto\RentHistoryDTO.java

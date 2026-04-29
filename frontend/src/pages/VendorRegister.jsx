@@ -26,6 +26,7 @@ const VendorRegister = () => {
     password: '',
     name: '',
     phone: '',
+    email: '',
     aadhaar: '',
     category: 'VEGETABLE',
     latitude: 17.6599,
@@ -59,6 +60,14 @@ const VendorRegister = () => {
           return Boolean(active) && type === 'ALLOWED' && available;
         });
         console.log('Filtered zones:', filtered);
+        console.log('Zone details:', filtered.map(z => ({
+          name: z.name,
+          id: z.id,
+          hasPolygon: !!z.polygonCoordinates,
+          hasRadius: !!z.radiusMeters,
+          lat: z.latitude,
+          lng: z.longitude
+        })));
         setZones(filtered);
       } catch (err) {
         const status = err?.response?.status;
@@ -195,12 +204,36 @@ const VendorRegister = () => {
 
   const focusZone = (zone) => {
     if (!zone) return;
-    const lat = Number(zone.latitude);
-    const lng = Number(zone.longitude);
+    let lat, lng;
+
+    if (zone.polygonCoordinates) {
+      // For polygon zones, calculate the center from polygon vertices
+      try {
+        const polygonPoints = typeof zone.polygonCoordinates === 'string'
+          ? JSON.parse(zone.polygonCoordinates)
+          : zone.polygonCoordinates;
+        // Calculate centroid
+        const sumLat = polygonPoints.reduce((sum, p) => sum + Number(p.lat), 0);
+        const sumLng = polygonPoints.reduce((sum, p) => sum + Number(p.lng), 0);
+        lat = sumLat / polygonPoints.length;
+        lng = sumLng / polygonPoints.length;
+      } catch (err) {
+        // Fallback to latitude/longitude if polygon parsing fails
+        lat = Number(zone.latitude);
+        lng = Number(zone.longitude);
+      }
+    } else {
+      // For circle zones
+      lat = Number(zone.latitude);
+      lng = Number(zone.longitude);
+    }
+
     pausePanUntilRef.current = Date.now() + 8000;
     if (!mapRef.current) return;
     mapRef.current.panTo({ lat, lng });
-    mapRef.current.setZoom(getZoomForRadius(zone.radiusMeters));
+    // For polygon zones, use a higher zoom level since radiusMeters might not apply
+    const zoom = zone.polygonCoordinates ? 17 : getZoomForRadius(zone.radiusMeters);
+    mapRef.current.setZoom(zoom);
   };
 
   const startLiveTracking = () => {
@@ -350,6 +383,10 @@ const VendorRegister = () => {
               <input name="phone" required value={formData.phone} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600" placeholder="10-digit mobile number" />
             </div>
             <div className="space-y-1">
+              <label className="text-sm font-semibold text-gray-600">Email Address (Optional)</label>
+              <input name="email" type="email" value={formData.email} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600" placeholder="your@email.com (for notifications)" />
+            </div>
+            <div className="space-y-1">
               <label className="text-sm font-semibold text-gray-600">Aadhaar Number</label>
               <input name="aadhaar" required value={formData.aadhaar} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600" placeholder="XXXX-XXXX-XXXX" />
             </div>
@@ -427,14 +464,12 @@ const VendorRegister = () => {
                 value={formData.zoneId}
                 onChange={(e) => {
                   const zone = zones.find(z => z.id === parseInt(e.target.value));
-                  console.log('Selected zone:', zone);
-                  console.log('Zone monthlyRent:', zone?.monthlyRent);
                   if (zone) focusZone(zone);
                   setFormData(prev => ({
                     ...prev,
                     zoneId: e.target.value,
-                    latitude: zone && !isLive ? (zone.centerLatitude || zone.latitude) : prev.latitude,
-                    longitude: zone && !isLive ? (zone.centerLongitude || zone.longitude) : prev.longitude,
+                    latitude: zone && !isLive && zone.latitude ? zone.latitude : prev.latitude,
+                    longitude: zone && !isLive && zone.longitude ? zone.longitude : prev.longitude,
                     monthlyRent: zone?.monthlyRent || prev.monthlyRent
                   }));
                 }}
@@ -522,17 +557,17 @@ const VendorRegister = () => {
                             setFormData(prev => ({
                               ...prev,
                               zoneId: zone.id.toString(),
-                              latitude: zone.centerLatitude || zone.latitude,
-                              longitude: zone.centerLongitude || zone.longitude,
+                              latitude: zone.latitude || prev.latitude,
+                              longitude: zone.longitude || prev.longitude,
                               monthlyRent: zone.monthlyRent || prev.monthlyRent
                             }));
                             focusZone(zone);
                           }}
                         />
-                      ) : (
+                      ) : zone.radiusMeters ? (
                         <Circle
                           key={zone.id}
-                          center={{ lat: Number(zone.centerLatitude || zone.latitude), lng: Number(zone.centerLongitude || zone.longitude) }}
+                          center={{ lat: Number(zone.latitude), lng: Number(zone.longitude) }}
                           radius={zone.radiusMeters}
                           options={{
                             fillColor: formData.zoneId == zone.id ? '#22c55e' : '#3b82f6',
@@ -546,14 +581,14 @@ const VendorRegister = () => {
                             setFormData(prev => ({
                               ...prev,
                               zoneId: zone.id.toString(),
-                              latitude: zone.centerLatitude || zone.latitude,
-                              longitude: zone.centerLongitude || zone.longitude,
+                              latitude: zone.latitude || prev.latitude,
+                              longitude: zone.longitude || prev.longitude,
                               monthlyRent: zone.monthlyRent || prev.monthlyRent
                             }));
                             focusZone(zone);
                           }}
                         />
-                      );
+                      ) : null;
                     })}
                   </GoogleMap>
                 ) : (

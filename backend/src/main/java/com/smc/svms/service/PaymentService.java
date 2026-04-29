@@ -25,8 +25,6 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 @Slf4j
 public class PaymentService {
-    
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(PaymentService.class);
 
     private final ChallanRepository challanRepository;
     private final com.smc.svms.repository.VendorRepository vendorRepository;
@@ -141,8 +139,9 @@ public class PaymentService {
                             .paymentYear(now.getYear())
                             .razorpayOrderId(request.getRazorpayOrderId())
                             .razorpayPaymentId(request.getRazorpayPaymentId())
+                            .status(RentPayment.PaymentStatus.PAID)
                             .build();
-                    
+
                     rentPaymentRepository.save(rentPayment);
                     return true;
                 }
@@ -177,10 +176,14 @@ public class PaymentService {
     }
 
     public java.util.List<RentPayment> getMyRentPayments(String username) {
-        return rentPaymentRepository.findByVendorVendorId(
-            vendorRepository.findByCreatedByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Vendor not found")).getVendorId()
-        );
+        com.smc.svms.entity.Vendor vendor = vendorRepository.findByCreatedByUsername(username)
+            .orElseThrow(() -> new RuntimeException("Vendor not found"));
+
+        // Temporarily disable auto-generation to test
+        // generatePendingRentPayments(vendor.getId());
+
+        // Use vendor's database ID instead of vendorId string
+        return rentPaymentRepository.findByVendorId(vendor.getId());
     }
 
     @Transactional(readOnly = true)
@@ -212,10 +215,57 @@ public class PaymentService {
             .razorpayOrderId("test_order_" + System.currentTimeMillis())
             .razorpayPaymentId("test_payment_" + System.currentTimeMillis())
             .paidAt(java.time.LocalDateTime.now())
+            .status(RentPayment.PaymentStatus.PAID)
             .build();
 
         rentPaymentRepository.save(testPayment);
         log.info("Test rent payment created for vendor: {}", vendor.getVendorId());
+    }
+
+    @Transactional
+    public void generatePendingRentPayments(Long vendorId) {
+        com.smc.svms.entity.Vendor vendor = vendorRepository.findById(vendorId)
+            .orElseThrow(() -> new RuntimeException("Vendor not found"));
+
+        if (vendor.getMonthlyRent() == null || vendor.getMonthlyRent().compareTo(BigDecimal.ZERO) <= 0) {
+            log.info("Vendor {} has no monthly rent set, skipping pending rent generation", vendor.getVendorId());
+            return;
+        }
+
+        LocalDate now = LocalDate.now();
+        LocalDate registrationDate = vendor.getCreatedAt() != null 
+            ? vendor.getCreatedAt().toLocalDate() 
+            : now.minusMonths(6); // Default to 6 months ago if no registration date
+
+        // Generate pending rent for each month from registration to current month
+        LocalDate currentMonth = now.withDayOfMonth(1);
+        LocalDate startMonth = registrationDate.withDayOfMonth(1);
+
+        while (!startMonth.isAfter(currentMonth)) {
+            // Check if a payment already exists for this month/year
+            java.util.List<RentPayment> existingPayments = rentPaymentRepository
+                .findByVendorIdAndPaymentMonthAndPaymentYear(
+                    vendorId, 
+                    startMonth.getMonthValue(), 
+                    startMonth.getYear()
+                );
+
+            if (existingPayments.isEmpty()) {
+                // Create pending rent payment
+                RentPayment pendingPayment = RentPayment.builder()
+                    .vendor(vendor)
+                    .amount(vendor.getMonthlyRent())
+                    .paymentMonth(startMonth.getMonthValue())
+                    .paymentYear(startMonth.getYear())
+                    .status(RentPayment.PaymentStatus.PENDING)
+                    .build();
+                rentPaymentRepository.save(pendingPayment);
+                log.info("Generated pending rent payment for vendor {} for {}/{}", 
+                    vendor.getVendorId(), startMonth.getMonthValue(), startMonth.getYear());
+            }
+
+            startMonth = startMonth.plusMonths(1);
+        }
     }
 
     @Transactional

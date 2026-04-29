@@ -64,6 +64,9 @@ const Navbar = () => {
                 <Link to="/my-challans" className="flex items-center gap-1 hover:text-smc-gold transition">
                   <Receipt size={18} /> My Challans
                 </Link>
+                <Link to="/my-rent-history" className="flex items-center gap-1 hover:text-smc-gold transition">
+                  <CreditCard size={18} /> Rent History
+                </Link>
               </>
             )}
 
@@ -135,6 +138,9 @@ const Navbar = () => {
                   </Link>
                   <Link to="/my-challans" className="flex items-center gap-2 hover:text-smc-gold transition px-2 py-2 rounded-lg hover:bg-blue-700" onClick={closeMobileMenu}>
                     <Receipt size={18} /> My Challans
+                  </Link>
+                  <Link to="/my-rent-history" className="flex items-center gap-2 hover:text-smc-gold transition px-2 py-2 rounded-lg hover:bg-blue-700" onClick={closeMobileMenu}>
+                    <CreditCard size={18} /> Rent History
                   </Link>
                 </>
               )}

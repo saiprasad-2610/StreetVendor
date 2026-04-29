@@ -21,6 +21,7 @@ const AddVendor = () => {
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
+    email: '',
     aadhaar: '',
     category: 'VEGETABLE',
     latitude: 17.6599,
@@ -118,6 +119,10 @@ const AddVendor = () => {
           <div className="space-y-1">
             <label className="text-sm font-semibold text-gray-600">Phone Number</label>
             <input name="phone" required value={formData.phone} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600" placeholder="10-digit mobile number" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-semibold text-gray-600">Email Address (Optional)</label>
+            <input name="email" type="email" value={formData.email} onChange={handleChange} className="w-full px-4 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-600" placeholder="your@email.com (for notifications)" />
           </div>
           <div className="space-y-1">
             <label className="text-sm font-semibold text-gray-600">Aadhaar Number</label>

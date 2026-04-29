@@ -11,4 +11,5 @@ public interface RentPaymentRepository extends JpaRepository<RentPayment, Long> 
     List<RentPayment> findByVendorVendorId(String vendorId);
     List<RentPayment> findByPaymentMonthAndPaymentYear(Integer month, Integer year);
     boolean existsByVendorIdAndPaymentMonthAndPaymentYear(Long vendorId, Integer month, Integer year);
+    List<RentPayment> findByVendorIdAndPaymentMonthAndPaymentYear(Long vendorId, Integer month, Integer year);
 }

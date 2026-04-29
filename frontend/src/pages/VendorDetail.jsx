@@ -313,32 +313,40 @@ const VendorDetail = () => {
             </div>
 
             {/* QR Code Card */}
-            {vendor.qrCodeUrl && (
-              <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-purple-100 rounded-lg">
-                    <QrIcon size={20} className="text-purple-600" />
-                  </div>
-                  <h2 className="text-lg font-bold text-gray-800">QR Code</h2>
+            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <QrIcon size={20} className="text-purple-600" />
                 </div>
-                <div className="flex flex-col items-center">
-                  <div className="p-4 bg-gray-50 rounded-2xl">
-                    <img
-                      src={vendor.qrCodeUrl}
-                      alt="Vendor QR Code"
-                      className="w-48 h-48"
-                    />
-                  </div>
-                  <a
-                    href={vendor.qrCodeUrl}
-                    download={`vendor-${vendor.vendorId}-qr.png`}
-                    className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition flex items-center gap-2 text-sm"
-                  >
-                    <Download size={16} /> Download QR Code
-                  </a>
-                </div>
+                <h2 className="text-lg font-bold text-gray-800">QR Code</h2>
               </div>
-            )}
+              <div className="flex flex-col items-center">
+                {vendor.qrCodeUrl ? (
+                  <>
+                    <div className="p-4 bg-gray-50 rounded-2xl">
+                      <img
+                        src={vendor.qrCodeUrl}
+                        alt="Vendor QR Code"
+                        className="w-48 h-48"
+                      />
+                    </div>
+                    <a
+                      href={vendor.qrCodeUrl}
+                      download={`vendor-${vendor.vendorId}-qr.png`}
+                      className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition flex items-center gap-2 text-sm"
+                    >
+                      <Download size={16} /> Download QR Code
+                    </a>
+                  </>
+                ) : (
+                  <div className="text-center p-8 bg-gray-50 rounded-2xl">
+                    <QrIcon size={48} className="text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">QR Code not generated yet</p>
+                    <p className="text-gray-400 text-xs mt-1">QR codes are generated upon approval</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Right Column */}
@@ -376,13 +384,15 @@ const VendorDetail = () => {
                     }}
                   >
                     <MapController vendor={vendor} zone={zone} />
-                    <Marker
-                      position={{ lat: vendor.latitude, lng: vendor.longitude }}
-                      icon={{
-                        url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
-                        scaledSize: new window.google.maps.Size(40, 40)
-                      }}
-                    />
+                    {vendor.latitude && vendor.longitude && (
+                      <Marker
+                        position={{ lat: vendor.latitude, lng: vendor.longitude }}
+                        icon={{
+                          url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+                          scaledSize: new window.google.maps.Size(40, 40)
+                        }}
+                      />
+                    )}
                     {zone && zone.polygonCoordinates ? (
                       <Polygon
                         paths={JSON.parse(zone.polygonCoordinates)}
@@ -410,8 +420,12 @@ const VendorDetail = () => {
                   </GoogleMap>
                 </div>
               ) : (
-                <div className="h-96 flex items-center justify-center bg-gray-100 rounded-2xl">
+                <div className="h-96 flex flex-col items-center justify-center bg-gray-100 rounded-2xl">
+                  <Map size={48} className="text-gray-300 mb-2" />
                   <p className="text-gray-500">Loading map...</p>
+                  {!import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
+                    <p className="text-red-500 text-xs mt-2">Google Maps API key not configured</p>
+                  )}
                 </div>
               )}
             </div>

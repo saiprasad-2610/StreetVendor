@@ -52,6 +52,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/violations/**").hasAnyRole("ADMIN", "OFFICER")
                 .requestMatchers("/api/challans/my").hasRole("VENDOR")
                 .requestMatchers("/api/challans/**").hasAnyRole("ADMIN", "OFFICER")
+                // Alert endpoints - vendor-specific must come before general
+                .requestMatchers("/api/alerts/vendor/**").hasAnyRole("VENDOR", "ADMIN", "OFFICER")
+                .requestMatchers("/api/alerts/*/vendor-acknowledge").hasAnyRole("VENDOR", "ADMIN", "OFFICER")
+                .requestMatchers("/api/alerts/**").hasAnyRole("ADMIN", "OFFICER")
                 .requestMatchers("/api/payments/rent-payments").hasAnyRole("ADMIN", "OFFICER")
                 .requestMatchers("/api/payments/rent-payments/**").hasAnyRole("ADMIN", "OFFICER")
                 .requestMatchers("/api/payments/rent-payments/create-test-simple").permitAll()
@@ -90,7 +94,7 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOriginPatterns(Arrays.asList("*")); // Allow all origins for mobile/multi-device testing
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-User-ID", "X-User-Role", "X-Requested-With"));
         configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

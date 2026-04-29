@@ -21,7 +21,7 @@ SSVMS is a production-level digital platform designed for Solapur Municipal Corp
    ```bash
    mvn spring-boot:run
    ```
-3. The server will start at `http://10.62.25.31:8080`.
+3. The server will start at `http://localhost:8080`.
 4. **Default Admin Credentials:**
    - **Username:** `admin`
    - **Password:** `admin123`
@@ -36,7 +36,7 @@ SSVMS is a production-level digital platform designed for Solapur Municipal Corp
    ```bash
    npm run dev
    ```
-4. The app will open at `http://10.62.25.31:3000`.
+4. The app will open at `http://localhost:3000`.
 
 ---
 
@@ -84,14 +84,14 @@ SSVMS is a production-level digital platform designed for Solapur Municipal Corp
 
 ### Login
 ```bash
-curl -X POST http://10.62.25.31:8080/api/auth/login \
+curl -X POST http://localhost:8080/api/auth/login \
 -H "Content-Type: application/json" \
 -d '{"username": "admin", "password": "admin123"}'
 ```
 
 ### Create Vendor (Admin)
 ```bash
-curl -X POST http://10.62.25.31:8080/api/vendors \
+curl -X POST http://localhost:8080/api/vendors \
 -H "Authorization: Bearer <YOUR_TOKEN>" \
 -H "Content-Type: application/json" \
 -d '{
@@ -107,7 +107,7 @@ curl -X POST http://10.62.25.31:8080/api/vendors \
 
 ### Validate Location
 ```bash
-curl -X POST http://10.62.25.31:8080/api/scan/validate \
+curl -X POST http://localhost:8080/api/scan/validate \
 -H "Content-Type: application/json" \
 -d '{
   "vendorId": "SMC-V-XXXXXX",

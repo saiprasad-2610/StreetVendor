@@ -69,8 +69,8 @@ mysql -u root -p
 
 ```sql
 CREATE DATABASE smc_vendor_management CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'smc_user'@'10.62.25.31' IDENTIFIED BY 'YourSecurePassword123!';
-GRANT ALL PRIVILEGES ON smc_vendor_management.* TO 'smc_user'@'10.62.25.31';
+CREATE USER 'smc_user'@'localhost' IDENTIFIED BY 'YourSecurePassword123!';
+GRANT ALL PRIVILEGES ON smc_vendor_management.* TO 'smc_user'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
@@ -121,7 +121,7 @@ sudo nano /opt/smc-vendor-management/backend/application.properties
 
 ```properties
 # Database Configuration
-spring.datasource.url=jdbc:mysql://10.62.25.31:3306/smc_vendor_management
+spring.datasource.url=jdbc:mysql://localhost:3306/smc_vendor_management
 spring.datasource.username=smc_user
 spring.datasource.password=YourSecurePassword123!
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
@@ -132,7 +132,7 @@ spring.jpa.show-sql=false
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
 
 # Redis Configuration
-spring.redis.host=10.62.25.31
+spring.redis.host=localhost
 spring.redis.port=6379
 spring.redis.password=YourRedisPassword123
 
@@ -149,7 +149,7 @@ server.port=8080
 server.servlet.context-path=/api
 
 # CORS Configuration
-cors.allowed-origins=http://10.62.25.31:3000,https://your-domain.com
+cors.allowed-origins=http://localhost:3000,https://your-domain.com
 ```
 
 ### 3. System Service Setup
@@ -262,7 +262,7 @@ server {
 
     # Backend API
     location /api {
-        proxy_pass http://10.62.25.31:8080;
+        proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -537,7 +537,7 @@ sudo journalctl -u smc-vendor-management -n 50
 #### 2. Database Connection Issues
 ```bash
 # Test connection
-mysql -u smc_user -p -h 10.62.25.31 smc_vendor_management
+mysql -u smc_user -p -h localhost smc_vendor_management
 
 # Check MySQL status
 sudo systemctl status mysql

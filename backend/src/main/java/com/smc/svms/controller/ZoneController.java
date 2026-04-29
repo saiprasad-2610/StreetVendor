@@ -2,6 +2,7 @@ package com.smc.svms.controller;
 
 import com.smc.svms.entity.Zone;
 import com.smc.svms.repository.ZoneRepository;
+import com.smc.svms.service.EnhancedGeofencingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -14,6 +15,7 @@ import java.util.List;
 public class ZoneController {
 
     private final ZoneRepository zoneRepository;
+    private final EnhancedGeofencingService geofencingService;
 
     @GetMapping
     public ResponseEntity<List<Zone>> getAllZones() {

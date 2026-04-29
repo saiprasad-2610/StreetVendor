@@ -52,6 +52,7 @@ public class VendorServiceImpl implements VendorService {
     private final ViolationPatternRepository violationPatternRepository;
     private final AlertRepository alertRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
 
     @Value("${app.qr-code-dir}")
     private String qrCodeDir;
@@ -114,6 +115,7 @@ public class VendorServiceImpl implements VendorService {
                 .vendorId(vendorId)
                 .name(request.getName())
                 .phone(request.getPhone())
+                .email(request.getEmail())
                 .aadhaar(request.getAadhaar()) // In real app, encrypt this
                 .faceImageUrl(request.getFaceImageUrl())
                 .category(request.getCategory())
@@ -207,6 +209,7 @@ public class VendorServiceImpl implements VendorService {
                 .vendorId(vendorId)
                 .name(request.getName())
                 .phone(request.getPhone())
+                .email(request.getEmail())
                 .aadhaar(request.getAadhaar())
                 .faceImageUrl(request.getFaceImageUrl())
                 .category(request.getCategory())
@@ -327,17 +330,22 @@ public class VendorServiceImpl implements VendorService {
     public VendorDTO approveVendor(Long id) {
         Vendor vendor = vendorRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Vendor not found"));
-        
+
         // Change status to approved
         vendor.setStatus(com.smc.svms.enums.VendorStatus.APPROVED);
-        
+
         // Generate QR code only when vendor is approved
         if (vendor.getQrCode() == null && vendor.getLocation() != null) {
             generateAndSaveQrCode(vendor);
             System.out.println("QR code generated for approved vendor: " + vendor.getVendorId());
         }
-        
-        return mapToDTO(vendorRepository.save(vendor));
+
+        Vendor approvedVendor = vendorRepository.save(vendor);
+
+        // Send approval email to vendor
+        emailService.sendVendorRegistrationApprovedEmail(approvedVendor);
+
+        return mapToDTO(approvedVendor);
     }
 
     @Override
@@ -417,6 +425,7 @@ public class VendorServiceImpl implements VendorService {
                 .vendorId(vendor.getVendorId())
                 .name(vendor.getName())
                 .phone(vendor.getPhone())
+                .email(vendor.getEmail())
                 .faceImageUrl(vendor.getFaceImageUrl())
                 .category(com.smc.svms.enums.VendorCategory.valueOf(vendor.getCategory().toString()))
                 .status(com.smc.svms.enums.VendorStatus.valueOf(vendor.getStatus().toString()))

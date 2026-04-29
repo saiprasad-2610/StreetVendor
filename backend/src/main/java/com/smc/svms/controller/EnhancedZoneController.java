@@ -45,10 +45,10 @@ public class EnhancedZoneController {
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Zone>> createZone(@Valid @RequestBody ZoneRequest request) {
-        
+
         try {
             // Validate polygon coordinates if provided
-            if (request.getPolygonCoordinates() != null && 
+            if (request.getPolygonCoordinates() != null &&
                 !geofencingService.validateZoneBoundary(request.getPolygonCoordinates())) {
                 return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Invalid polygon coordinates"));
@@ -89,15 +89,15 @@ public class EnhancedZoneController {
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<Zone>> updateZone(
-            @PathVariable Long id, 
+            @PathVariable Long id,
             @Valid @RequestBody ZoneRequest request) {
-        
+
         try {
             Zone zone = zoneRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Zone not found"));
 
             // Validate polygon coordinates if provided
-            if (request.getPolygonCoordinates() != null && 
+            if (request.getPolygonCoordinates() != null &&
                 !geofencingService.validateZoneBoundary(request.getPolygonCoordinates())) {
                 return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Invalid polygon coordinates"));

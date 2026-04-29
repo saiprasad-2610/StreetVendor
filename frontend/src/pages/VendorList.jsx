@@ -17,7 +17,7 @@ const VendorList = () => {
 
   const fetchVendors = async () => {
     try {
-      const response = await axios.get('http://10.62.25.31:8080/api/vendors');
+      const response = await axios.get('http://localhost:8080/api/vendors');
       // Handle wrapped response structure
       const vendorsData = response.data?.data || response.data;
       if (Array.isArray(vendorsData)) {
@@ -37,7 +37,7 @@ const VendorList = () => {
   const handleStatusChange = async (id, action) => {
     try {
       // Backend uses PUT /api/vendors/{id}/approve and PUT /api/vendors/{id}/reject
-      const endpoint = `http://10.62.25.31:8080/api/vendors/${id}/${action}`;
+      const endpoint = `http://localhost:8080/api/vendors/${id}/${action}`;
       await axios.put(endpoint);
       fetchVendors();
     } catch (err) {

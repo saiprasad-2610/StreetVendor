@@ -29,7 +29,9 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     List<Alert> findByPriorityLevelGreaterThanEqualOrderByPriorityLevelDesc(Integer priorityLevel);
     
     List<Alert> findByOfficerIdOrderByCreatedAtDesc(Long officerId);
-    
+
+    List<Alert> findByVendor_IdOrderByCreatedAtDesc(Long vendorId);
+
     Page<Alert> findAllByOrderByCreatedAtDesc(Pageable pageable);
     
     List<Alert> findByCreatedAtBetweenOrderByCreatedAtDesc(LocalDateTime startDate, LocalDateTime endDate);

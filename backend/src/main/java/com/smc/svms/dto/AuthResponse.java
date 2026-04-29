@@ -11,8 +11,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AuthResponse {
+    private Long id;
     private String token;
     private String username;
     private String fullName;
     private UserRole role;
+    private String vendorId; // For VENDOR role users
 }

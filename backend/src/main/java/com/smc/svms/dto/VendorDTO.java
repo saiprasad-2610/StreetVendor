@@ -8,6 +8,7 @@ public class VendorDTO {
     private String vendorId;
     private String name;
     private String phone;
+    private String email;
     private String faceImageUrl;
     private VendorCategory category;
     private VendorStatus status;
@@ -36,6 +37,9 @@ public class VendorDTO {
 
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
     public String getFaceImageUrl() { return faceImageUrl; }
     public void setFaceImageUrl(String faceImageUrl) { this.faceImageUrl = faceImageUrl; }
@@ -88,6 +92,7 @@ public class VendorDTO {
         public Builder vendorId(String vendorId) { d.vendorId = vendorId; return this; }
         public Builder name(String name) { d.name = name; return this; }
         public Builder phone(String phone) { d.phone = phone; return this; }
+        public Builder email(String email) { d.email = email; return this; }
         public Builder faceImageUrl(String faceImageUrl) { d.faceImageUrl = faceImageUrl; return this; }
         public Builder category(VendorCategory category) { d.category = category; return this; }
         public Builder status(VendorStatus status) { d.status = status; return this; }

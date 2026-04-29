@@ -22,6 +22,8 @@ const QRScanner = () => {
   const [pendingVendorId, setPendingVendorId] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
+  const [capturedImages, setCapturedImages] = useState([]);
+  const [isAddingMorePhotos, setIsAddingMorePhotos] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
   const videoRef = useRef(null);
@@ -281,10 +283,10 @@ const QRScanner = () => {
 
   // Handle Photo Capture
   useEffect(() => {
-    if (showCamera && !capturedImage) {
+    if (showCamera && capturedImages.length === 0) {
       startCamera();
     }
-  }, [showCamera, capturedImage]);
+  }, [showCamera, capturedImages]);
 
   const startCamera = async () => {
     try {
@@ -323,33 +325,39 @@ const QRScanner = () => {
 
       const width = video.videoWidth;
       const height = video.videoHeight;
-      
+
       // ANTI-FRAUD: Verify video dimensions (real camera has standard dimensions)
       if (width < 640 || height < 480) {
         setError("❌ FRAUD DETECTED: Invalid camera resolution. Real camera required.");
         return;
       }
-      
+
+      // Check max photos limit
+      if (capturedImages.length >= 4) {
+        setError("Maximum 4 photos allowed. Please proceed or delete a photo to retake.");
+        return;
+      }
+
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
-      
+
       // 1. Draw the actual photo
       ctx.drawImage(video, 0, 0, width, height);
-      
+
       // 2. Add Enhanced Geo-Tag Overlay (Advanced Anti-Fraud Watermark)
       const overlayHeight = height * 0.30; // Increased overlay for more security info
       ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
       ctx.fillRect(0, height - overlayHeight, width, overlayHeight);
-      
+
       // Add gradient border for authenticity
       ctx.strokeStyle = '#fbbf24';
       ctx.lineWidth = 4;
       ctx.strokeRect(2, 2, width - 4, height - 4);
-      
+
       ctx.fillStyle = 'white';
       ctx.font = `bold ${Math.max(12, width * 0.035)}px Arial`;
-      
+
       const padding = width * 0.05;
       let currentY = height - overlayHeight + padding;
       const lineSpacing = width * 0.045;
@@ -383,26 +391,42 @@ const QRScanner = () => {
         coordinates: { lat: location.lat, lng: location.lng },
         accuracy: accuracy,
         deviceFingerprint: generateDeviceFingerprint(),
-        canvasSignature: btoa(`${width}x${height}${now.getTime()}`).substring(0, 20)
+        canvasSignature: btoa(`${width}x${height}${now.getTime()}`).substring(0, 20),
+        photoIndex: capturedImages.length + 1
       };
-      
+
       // Embed metadata as invisible pixels (advanced anti-fraud)
       embedMetadataInCanvas(ctx, metadata, width, height);
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.9); // Higher quality for better analysis
-      setCapturedImage(dataUrl);
-      
-      // Stop stream immediately after capture
-      const stream = video.srcObject;
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-      
-      // Proceed to validation with enhanced security
-      if (pendingVendorId) {
-        handleValidation(pendingVendorId, dataUrl);
+
+      // Add to captured images array
+      setCapturedImages(prev => [...prev, dataUrl]);
+      setCapturedImage(dataUrl); // Keep for backward compatibility
+      setIsAddingMorePhotos(false); // Return to review mode
+
+      // If max photos reached, stop camera
+      if (capturedImages.length + 1 >= 4) {
+        const stream = video.srcObject;
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
       }
     }
+  };
+
+  const deletePhoto = (index) => {
+    setCapturedImages(prev => prev.filter((_, i) => i !== index));
+    // Restart camera if no photos left
+    if (capturedImages.length === 1) {
+      startCamera();
+    }
+  };
+
+  const retakePhoto = () => {
+    setCapturedImages([]);
+    setCapturedImage(null);
+    startCamera();
   };
 
   // Generate secure token with checksum
@@ -446,18 +470,20 @@ const QRScanner = () => {
     }
   };
 
-  const handleValidation = async (vendorId, photoData) => {
-    // MANDATORY: Photo capture is required for validation
-    if (!photoData || !photoData.startsWith('data:image')) {
-      setError("❌ FRAUD DETECTED: Real photo capture is mandatory. Please use camera to capture vendor location.");
+  const handleValidation = async (vendorId) => {
+    // MANDATORY: Minimum 2 photos required for validation
+    if (capturedImages.length < 2) {
+      setError("❌ MINIMUM 2 PHOTOS REQUIRED: Please capture at least 2 photos from different angles to proceed.");
       return;
     }
 
-    // FRAUD DETECTION: Validate photo authenticity
-    const validationResult = validatePhotoAuthenticity(photoData);
-    if (!validationResult.isValid) {
-      setError(`❌ ${validationResult.error}`);
-      return;
+    // FRAUD DETECTION: Validate all photos authenticity
+    for (let i = 0; i < capturedImages.length; i++) {
+      const validationResult = validatePhotoAuthenticity(capturedImages[i]);
+      if (!validationResult.isValid) {
+        setError(`❌ Photo ${i + 1} validation failed: ${validationResult.error}`);
+        return;
+      }
     }
 
     // CRITICAL: Refresh location before validation for real-time accuracy
@@ -479,13 +505,23 @@ const QRScanner = () => {
       formData.append('gpsAccuracy', freshLocation.accuracy);
       formData.append('deviceId', navigator.userAgent || "unknown_device");
       formData.append('weatherCondition', "clear");
+      formData.append('photoCount', capturedImages.length);
 
-      // Convert base64 to blob and upload real photo
-      const response = await fetch(photoData);
-      const blob = await response.blob();
-      formData.append('image', blob, `scan_${vendorId}_${Date.now()}.jpg`);
+      // FRAUD PREVENTION: Send scanner identity information
+      const scannerInfo = getScannerInfo();
+      formData.append('scannerType', scannerInfo.type);
+      formData.append('scannerId', scannerInfo.id);
+      formData.append('scannerName', scannerInfo.name);
+      formData.append('sessionToken', scannerInfo.token || '');
 
-      // Upload photo and validate with security checks
+      // Upload all captured photos
+      for (let i = 0; i < capturedImages.length; i++) {
+        const response = await fetch(capturedImages[i]);
+        const blob = await response.blob();
+        formData.append('images', blob, `scan_${vendorId}_${i + 1}_${Date.now()}.jpg`);
+      }
+
+      // Upload photos and validate with security checks
       const uploadResponse = await axios.post('/api/scan/upload-and-validate', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -544,6 +580,44 @@ const QRScanner = () => {
     }
   };
 
+  /**
+   * FRAUD PREVENTION: Determine scanner type based on authenticated user
+   * This prevents false challans from malicious third-party scans
+   */
+  const getScannerInfo = () => {
+    // Default: anonymous public user (safest assumption for fraud prevention)
+    let scannerType = 'PUBLIC_USER';
+    let scannerId = 'anonymous';
+    let scannerName = 'Public User';
+    let token = localStorage.getItem('token') || '';
+    
+    if (user) {
+      // User is logged in - determine role
+      scannerId = user.id || user.username || 'unknown';
+      scannerName = user.name || user.username || 'Unknown User';
+      
+      if (user.role === 'VENDOR' || user.role === 'ROLE_VENDOR') {
+        // Vendor scanning their own QR code
+        scannerType = 'VENDOR_SELF';
+      } else if (user.role === 'OFFICER' || user.role === 'ROLE_OFFICER' || 
+                 user.role === 'ADMIN' || user.role === 'ROLE_ADMIN' ||
+                 user.role === 'SMC_OFFICER') {
+        // Authenticated enforcement officer
+        scannerType = 'ENFORCEMENT_OFFICER';
+      } else {
+        // Other logged-in users (citizens, etc.) - still treat as public for safety
+        scannerType = 'PUBLIC_USER';
+      }
+    }
+    
+    return {
+      type: scannerType,
+      id: scannerId,
+      name: scannerName,
+      token: token
+    };
+  };
+
   const useMockLocation = () => {
     // Mock Solapur location
     const mockLoc = { lat: 17.6599, lng: 75.9064 };
@@ -573,6 +647,13 @@ const QRScanner = () => {
 
   const handleReport = async () => {
     if (!scanResult) return;
+
+    // Require minimum 2 photos for violation reporting
+    if (capturedImages.length < 2) {
+      alert("❌ Minimum 2 photos required: Please capture at least 2 photos from different angles for evidence.");
+      return;
+    }
+
     setReporting(true);
     try {
       // Use FormData to match backend's @RequestParam and MultipartFile expectations
@@ -580,13 +661,14 @@ const QRScanner = () => {
       formData.append('vendorId', scanResult.vendorId);
       formData.append('gpsLatitude', location.lat);
       formData.append('gpsLongitude', location.lng);
-      formData.append('description', description || "Location violation reported with geo-tagged photo");
-      
-      // If we have a captured image (base64), convert to blob and append
-      if (capturedImage && capturedImage.startsWith('data:image')) {
-        const response = await fetch(capturedImage);
+      formData.append('description', description || "Location violation reported with geo-tagged photos");
+      formData.append('photoCount', capturedImages.length);
+
+      // Upload all captured photos
+      for (let i = 0; i < capturedImages.length; i++) {
+        const response = await fetch(capturedImages[i]);
         const blob = await response.blob();
-        formData.append('image', blob, `violation_${scanResult.vendorId}.jpg`);
+        formData.append('images', blob, `violation_${scanResult.vendorId}_${i + 1}.jpg`);
       }
 
       await axios.post('/api/violations/report', formData, {
@@ -636,6 +718,13 @@ const QRScanner = () => {
             <div>✅ GPS coordinate verification</div>
             <div>✅ Timestamp and watermark checking</div>
             <div>✅ Device fingerprinting enabled</div>
+            <div className="text-yellow-400 font-semibold mt-2 pt-2 border-t border-red-500/30">
+              {user?.role === 'OFFICER' || user?.role === 'ROLE_OFFICER' || user?.role === 'ADMIN' 
+                ? '🔐 Authenticated Officer - Auto-challan enabled' 
+                : user?.role === 'VENDOR' || user?.role === 'ROLE_VENDOR'
+                ? '👤 Vendor Self-Scan - No auto-challan'
+                : '⚠️ Public Scan - Pending review only (Fraud Protection)'}
+            </div>
           </div>
         </div>
 
@@ -673,7 +762,7 @@ const QRScanner = () => {
         )}
 
         {/* 2. Photo Capture Phase (Mandatory Anti-Fraud Verification) */}
-        {showCamera && !capturedImage && (
+        {showCamera && (capturedImages.length === 0 || isAddingMorePhotos) && (
           <div className="bg-black rounded-2xl overflow-hidden shadow-2xl relative border-4 border-red-500 animate-in fade-in duration-500">
             <video ref={videoRef} autoPlay playsInline className="w-full aspect-square object-cover" />
             
@@ -688,8 +777,25 @@ const QRScanner = () => {
               </div>
             </div>
             
+            {/* Scanner Type Badge */}
+            <div className="absolute top-12 left-4">
+              {user?.role === 'OFFICER' || user?.role === 'ROLE_OFFICER' || user?.role === 'ADMIN' ? (
+                <div className="bg-blue-600/90 px-3 py-1 rounded-full text-xs font-bold">
+                  👮 ENFORCEMENT OFFICER
+                </div>
+              ) : user?.role === 'VENDOR' || user?.role === 'ROLE_VENDOR' ? (
+                <div className="bg-green-600/90 px-3 py-1 rounded-full text-xs font-bold">
+                  👤 VENDOR SELF-SCAN
+                </div>
+              ) : (
+                <div className="bg-yellow-600/90 px-3 py-1 rounded-full text-xs font-bold">
+                  👥 PUBLIC USER
+                </div>
+              )}
+            </div>
+            
             {/* Anti-Fraud Warning */}
-            <div className="absolute top-20 left-4 bg-red-900/90 px-3 py-2 rounded-lg max-w-[200px]">
+            <div className="absolute top-24 left-4 bg-red-900/90 px-3 py-2 rounded-lg max-w-[200px]">
               <p className="text-xs font-bold text-white">⚠️ FRAUD DETECTION</p>
               <p className="text-xs text-gray-300">Real camera capture required. No uploads or screenshots allowed.</p>
             </div>
@@ -703,20 +809,97 @@ const QRScanner = () => {
                 <div className="text-xs text-yellow-400 mt-2">
                   ✓ EXIF validation ✓ GPS verification ✓ Timestamp check ✓ Watermark verification
                 </div>
+                <div className="text-xs text-white mt-2 font-bold">
+                  Photos: {capturedImages.length}/4 (Min 2 required)
+                </div>
               </div>
-              
+
               <button 
                 onClick={takePhoto}
-                className="w-24 h-24 bg-red-600 rounded-full border-4 border-white flex items-center justify-center hover:scale-105 transition shadow-lg"
+                disabled={capturedImages.length >= 4}
+                className={`w-24 h-24 rounded-full border-4 border-white flex items-center justify-center hover:scale-105 transition shadow-lg ${capturedImages.length >= 4 ? 'bg-gray-500 cursor-not-allowed' : 'bg-red-600'}`}
               >
                 <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                  <Camera size={40} className="text-red-600" />
+                  <Camera size={40} className={capturedImages.length >= 4 ? 'text-gray-500' : 'text-red-600'} />
                 </div>
               </button>
               
               <p className="text-xs text-gray-400 text-center">
-                Tap to capture secure verification photo
+                {capturedImages.length >= 4 ? 'Maximum photos reached' : 'Tap to capture secure verification photo'}
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Captured Photos Review Phase */}
+        {showCamera && capturedImages.length > 0 && !isAddingMorePhotos && (
+          <div className="bg-gray-800 rounded-2xl overflow-hidden shadow-2xl p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white">Captured Photos ({capturedImages.length}/4)</h3>
+              <button
+                onClick={retakePhoto}
+                className="text-sm bg-gray-600 text-white px-3 py-1 rounded-lg hover:bg-gray-700 transition"
+              >
+                Retake All
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {capturedImages.map((img, index) => (
+                <div key={index} className="relative group">
+                  <img 
+                    src={img} 
+                    alt={`Capture ${index + 1}`}
+                    className="w-full aspect-square object-cover rounded-lg border-2 border-gray-600"
+                  />
+                  <div className="absolute top-2 left-2 bg-black/70 px-2 py-1 rounded text-xs font-bold text-white">
+                    #{index + 1}
+                  </div>
+                  <button
+                    onClick={() => deletePhoto(index)}
+                    className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white w-6 h-6 rounded-full flex items-center justify-center transition"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Add More Photo Button */}
+            {capturedImages.length < 4 && (
+              <button
+                onClick={() => {
+                  setIsAddingMorePhotos(true);
+                  startCamera();
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition"
+              >
+                <Camera size={20} />
+                Add Photo ({capturedImages.length}/4)
+              </button>
+            )}
+
+            {/* Proceed Button */}
+            <div className="space-y-2">
+              {capturedImages.length < 2 && (
+                <p className="text-xs text-yellow-400 text-center">
+                  ⚠️ Minimum 2 photos required from different angles for fraud prevention
+                </p>
+              )}
+              <button
+                onClick={() => handleValidation(pendingVendorId)}
+                disabled={capturedImages.length < 2 || loading}
+                className={`w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition ${
+                  capturedImages.length < 2 
+                    ? 'bg-gray-500 text-gray-300 cursor-not-allowed' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                <ShieldCheck size={24} />
+                {capturedImages.length < 2 
+                  ? `Need ${2 - capturedImages.length} more photo(s)` 
+                  : 'Proceed with Validation'}
+              </button>
             </div>
           </div>
         )}
@@ -844,7 +1027,7 @@ const QRScanner = () => {
               <div className="flex justify-between border-b border-white/5 pb-2">
                 <span className="text-gray-400">Distance Error</span>
                 <span className="font-bold text-red-400">
-                  {scanResult.distance !== null ? `${scanResult.distance.toFixed(2)} meters` : 'N/A'}
+                  {scanResult.distance !== null ? `${(scanResult.distance * 3.281).toFixed(2)} ft` : 'N/A'}
                 </span>
               </div>
               {scanResult.confidence !== null && (
@@ -867,14 +1050,26 @@ const QRScanner = () => {
                 <div className="flex justify-between">
                   <span className="text-gray-400">GPS Accuracy</span>
                   <span className={`font-bold ${scanResult.gpsAccuracy <= 10 ? 'text-green-400' : scanResult.gpsAccuracy <= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
-                    ±{scanResult.gpsAccuracy.toFixed(1)}m
+                    ±{(scanResult.gpsAccuracy * 3.281).toFixed(1)} ft
                   </span>
                 </div>
               )}
             </div>
 
+            {/* FRAUD PREVENTION: Show different messages based on scanner type */}
             {scanResult.validationStatus !== 'VALID' && (
               <div className="space-y-4">
+                {/* Show fraud prevention notice for non-officer scans */}
+                {!(user?.role === 'OFFICER' || user?.role === 'ROLE_OFFICER' || user?.role === 'ADMIN') && (
+                  <div className="bg-yellow-500/10 border border-yellow-500/50 p-3 rounded-lg">
+                    <p className="text-xs text-yellow-400 font-semibold">
+                      ⚠️ FRAUD PROTECTION: This report will be marked for PENDING REVIEW
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Auto-challan is disabled for public scans to prevent false reports. SMC officers will review this evidence before taking action.
+                    </p>
+                  </div>
+                )}
                 <textarea 
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -886,7 +1081,10 @@ const QRScanner = () => {
                   disabled={reporting}
                   className="w-full bg-red-500 text-white py-4 rounded-xl font-bold hover:bg-red-600 transition shadow-lg flex items-center justify-center gap-2"
                 >
-                  <Send size={20} /> {reporting ? 'Submitting Evidence...' : 'SUBMIT SECURE REPORT'}
+                  <Send size={20} /> {reporting ? 'Submitting Evidence...' : 
+                    (user?.role === 'OFFICER' || user?.role === 'ROLE_OFFICER' || user?.role === 'ADMIN') 
+                      ? 'SUBMIT SECURE REPORT' 
+                      : 'SUBMIT FOR REVIEW'}
                 </button>
               </div>
             )}
@@ -902,7 +1100,11 @@ const QRScanner = () => {
             <ShieldCheck size={64} className="mx-auto text-green-500" />
             <h2 className="text-2xl font-bold text-green-500">Evidence Submitted</h2>
             <p className="text-gray-300">
-              Thank you. The geo-tagged photo and location data have been sent to SMC. An automatic challan has been issued to the vendor.
+              {(user?.role === 'OFFICER' || user?.role === 'ROLE_OFFICER' || user?.role === 'ADMIN') ? (
+                <>Thank you. The geo-tagged photo and location data have been sent to SMC. <strong>An automatic challan has been issued to the vendor.</strong></>
+              ) : (
+                <>Thank you. Your report has been submitted for <strong>pending review</strong>. To prevent false reports, SMC officers will verify this evidence before taking any action against the vendor.</>
+              )}
             </p>
             <button onClick={resetScanner} className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition">
               FINISH

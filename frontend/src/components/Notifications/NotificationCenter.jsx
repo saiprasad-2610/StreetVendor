@@ -2,31 +2,70 @@ import React, { useState, useEffect } from 'react';
 import { Badge, Drawer, List, Button, Empty, Tag, notification, Typography, Space } from 'antd';
 import { BellOutlined, DeleteOutlined, CheckOutlined, WarningOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { alertAPI, violationAPI, zoneAPI } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import axios from 'axios';
 
 const { Text } = Typography;
 
 const NotificationCenter = () => {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [vendorInfo, setVendorInfo] = useState(null);
+
+  useEffect(() => {
+    // Fetch vendor info if user is a vendor
+    if (user?.role === 'VENDOR') {
+      fetchVendorInfo();
+    }
+  }, [user]);
 
   useEffect(() => {
     loadNotifications();
     // Poll for new notifications every 30 seconds
     const interval = setInterval(loadNotifications, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [vendorInfo]);
+
+  const fetchVendorInfo = async () => {
+    try {
+      const response = await axios.get('/api/vendors/me');
+      setVendorInfo(response.data);
+    } catch (error) {
+      console.error('Failed to fetch vendor info:', error);
+    }
+  };
 
   const loadNotifications = async () => {
     try {
       setLoading(true);
-      const [alertsRes, violationsRes] = await Promise.all([
-        alertAPI.getAll().catch(() => ({ data: [] })),
-        violationAPI.getAll().catch(() => ({ data: [] }))
-      ]);
+      console.log('Loading notifications - User:', user?.role, 'VendorInfo:', vendorInfo);
 
-      const alerts = Array.isArray(alertsRes.data) ? alertsRes.data : [];
+      let alertsRes;
+
+      // Use vendor-specific endpoint for vendors, general endpoint for admin/officer
+      if (user?.role === 'VENDOR' && vendorInfo?.id) {
+        console.log('Fetching vendor alerts for vendor ID:', vendorInfo.id);
+        alertsRes = await alertAPI.getForVendor(vendorInfo.id).catch((err) => {
+          console.error('Error fetching vendor alerts:', err);
+          return { data: [] };
+        });
+        console.log('Vendor alerts response:', alertsRes);
+      } else if (user?.role === 'ADMIN' || user?.role === 'OFFICER') {
+        alertsRes = await alertAPI.getAll().catch(() => ({ data: [] }));
+      } else {
+        console.log('No matching role or missing vendorInfo.id');
+        alertsRes = { data: [] };
+      }
+
+      const violationsRes = (user?.role === 'ADMIN' || user?.role === 'OFFICER')
+        ? await violationAPI.getAll().catch(() => ({ data: [] }))
+        : { data: [] };
+
+      const alerts = Array.isArray(alertsRes.data?.data) ? alertsRes.data.data :
+                    Array.isArray(alertsRes.data) ? alertsRes.data : [];
       const violations = Array.isArray(violationsRes.data) ? violationsRes.data : [];
 
       const combinedNotifications = [
@@ -84,12 +123,18 @@ const NotificationCenter = () => {
     });
   };
 
-  const handleNotificationClick = (notification) => {
+  const handleNotificationClick = async (notification) => {
     markAsRead(notification.id);
-    
+
     if (notification.type === 'alert') {
-      // Handle alert click - could navigate to alert details
-      console.log('Alert clicked:', notification.data);
+      // Acknowledge the alert on the server for vendors
+      if (user?.role === 'VENDOR' && notification.data?.id) {
+        try {
+          await alertAPI.acknowledgeForVendor(notification.data.id);
+        } catch (error) {
+          console.error('Failed to acknowledge alert:', error);
+        }
+      }
     } else if (notification.type === 'violation') {
       // Handle violation click - could navigate to violation details
       console.log('Violation clicked:', notification.data);
@@ -131,11 +176,37 @@ const NotificationCenter = () => {
     const now = new Date();
     const time = new Date(timestamp);
     const diff = now - time;
-    
+
     if (diff < 60000) return 'Just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)} hours ago`;
     return time.toLocaleDateString();
+  };
+
+  const formatWarningMessage = (message) => {
+    if (!message) return null;
+
+    // Parse the warning message structure
+    const lines = message.split('\n');
+    const greeting = lines[0];
+    const detailsStart = lines.findIndex(l => l.includes('Violation Details:'));
+    const mainMessage = lines.slice(0, detailsStart).join(' ').replace(greeting, '').trim();
+
+    const details = {};
+    for (let i = detailsStart + 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('- ')) {
+        const [key, value] = line.substring(2).split(':', 2);
+        if (key && value) {
+          details[key.trim()] = value.trim();
+        }
+      }
+    }
+
+    const footerIndex = lines.findIndex(l => l.includes('SMC Street Vendor Management System'));
+    const advice = footerIndex > 0 ? lines[footerIndex - 1] : '';
+
+    return { greeting, mainMessage, details, advice };
   };
 
   return (
@@ -228,12 +299,81 @@ const NotificationCenter = () => {
                     </Space>
                   }
                   description={
-                    <div>
-                      <Text type="secondary">{item.description}</Text>
-                      <br />
-                      <Text type="secondary" style={{ fontSize: '12px' }}>
-                        {formatTime(item.timestamp)}
-                      </Text>
+                    <div style={{ marginTop: '4px' }}>
+                      {item.type === 'alert' && item.title?.includes('Warning') ? (
+                        // Enhanced warning message display
+                        (() => {
+                          const parsed = formatWarningMessage(item.description);
+                          return parsed ? (
+                            <div style={{ lineHeight: '1.5' }}>
+                              <div style={{ marginBottom: '8px' }}>
+                                <Text strong style={{ fontSize: '14px' }}>
+                                  {parsed.greeting}
+                                </Text>
+                              </div>
+
+                              <div style={{
+                                backgroundColor: '#fff7e6',
+                                borderLeft: '3px solid #faad14',
+                                padding: '8px 12px',
+                                marginBottom: '10px',
+                                borderRadius: '4px'
+                              }}>
+                                <Text>{parsed.mainMessage}</Text>
+                              </div>
+
+                              {Object.keys(parsed.details).length > 0 && (
+                                <div style={{ marginBottom: '10px' }}>
+                                  <Text strong style={{ fontSize: '12px', color: '#666' }}>
+                                    Violation Details:
+                                  </Text>
+                                  <div style={{ marginLeft: '8px', marginTop: '4px' }}>
+                                    {Object.entries(parsed.details).map(([key, value]) => (
+                                      <div key={key} style={{ marginBottom: '2px' }}>
+                                        <Tag color="default" style={{ marginRight: '4px', fontSize: '11px' }}>
+                                          {key}
+                                        </Tag>
+                                        <Text style={{ fontSize: '12px' }}>{value}</Text>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {parsed.advice && (
+                                <div style={{
+                                  backgroundColor: '#f6ffed',
+                                  borderLeft: '3px solid #52c41a',
+                                  padding: '8px 12px',
+                                  marginBottom: '8px',
+                                  borderRadius: '4px'
+                                }}>
+                                  <Text style={{ fontSize: '12px', color: '#389e0d' }}>
+                                    <CheckOutlined style={{ marginRight: '4px' }} />
+                                    {parsed.advice}
+                                  </Text>
+                                </div>
+                              )}
+
+                              <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '8px' }}>
+                                {formatTime(item.timestamp)}
+                              </Text>
+                            </div>
+                          ) : (
+                            <Text type="secondary">{item.description}</Text>
+                          );
+                        })()
+                      ) : (
+                        // Default display for non-warning notifications
+                        <>
+                          <Text type="secondary" style={{ display: 'block', marginBottom: '4px', lineHeight: '1.5' }}>
+                            {item.description}
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: '12px' }}>
+                            {formatTime(item.timestamp)}
+                          </Text>
+                        </>
+                      )}
                     </div>
                   }
                 />

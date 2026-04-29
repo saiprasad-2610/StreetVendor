@@ -2,20 +2,38 @@ import axios from 'axios';
 
 // Create axios instance with base configuration
 const api = axios.create({
-  baseURL: 'http://10.62.25.31:8080/api', // Backend API base URL
+  baseURL: 'http://localhost:8080/api', // Backend API base URL
   timeout: 10000, // 10 seconds timeout
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add auth token and user info
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
+    const user = localStorage.getItem('user');
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Add user info headers for vendor-specific endpoints
+    if (user) {
+      try {
+        const userData = JSON.parse(user);
+        if (userData.id) {
+          config.headers['X-User-ID'] = userData.id;
+        }
+        if (userData.role) {
+          config.headers['X-User-Role'] = userData.role;
+        }
+      } catch (e) {
+        // Ignore parsing errors
+      }
+    }
+
     return config;
   },
   (error) => {
@@ -97,6 +115,8 @@ export const alertAPI = {
   resolve: (id, resolutionData) => api.post(`/alerts/${id}/resolve`, resolutionData),
   getStatistics: (params) => api.get('/alerts/statistics', { params }),
   getForOfficer: (officerId) => api.get(`/alerts/officer/${officerId}`),
+  getForVendor: (vendorId) => api.get(`/alerts/vendor/${vendorId}`),
+  acknowledgeForVendor: (id) => api.put(`/alerts/${id}/vendor-acknowledge`),
 };
 
 export const analyticsAPI = {

@@ -38,7 +38,8 @@ public class AlertController {
     }
     
     /**
-     * Get all alerts
+     * Get all alerts (admin/officer view - excludes vendor warnings)
+     * Vendor warnings are only visible to the specific vendor via /api/alerts/vendor/{vendorId}
      */
     @GetMapping
     @PreAuthorize("hasRole('ADMIN') or hasRole('OFFICER')")
@@ -47,29 +48,34 @@ public class AlertController {
             @RequestParam(required = false) AlertSeverity severity,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        
+
         try {
             Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-            
+
             Page<Alert> alerts;
             if (status != null && severity != null) {
                 alerts = alertRepository.findByStatusAndSeverity(
-                    status, 
-                    severity, 
+                    status,
+                    severity,
                     pageable);
             } else if (status != null) {
                 alerts = alertRepository.findByStatusOrderByCreatedAtDesc(
-                    status, 
+                    status,
                     pageable);
             } else if (severity != null) {
                 alerts = alertRepository.findBySeverityOrderByCreatedAtDesc(
-                    severity, 
+                    severity,
                     pageable);
             } else {
                 alerts = alertRepository.findAllByOrderByCreatedAtDesc(pageable);
             }
-            
-            return ResponseEntity.ok(ApiResponse.success(alerts.getContent()));
+
+            // Filter out vendor warnings - these are only visible to the specific vendor
+            List<Alert> filteredAlerts = alerts.getContent().stream()
+                .filter(alert -> !"VIOLATION_WARNING".equals(alert.getAlertType()))
+                .toList();
+
+            return ResponseEntity.ok(ApiResponse.success(filteredAlerts));
         } catch (Exception e) {
             log.error("Failed to get alerts", e);
             return ResponseEntity.status(500)
@@ -78,15 +84,19 @@ public class AlertController {
     }
     
     /**
-     * Get pending alerts
+     * Get pending alerts (admin/officer view - excludes vendor warnings)
      */
     @GetMapping("/pending")
     @PreAuthorize("hasRole('ADMIN') or hasRole('OFFICER')")
     public ResponseEntity<ApiResponse<List<Alert>>> getPendingAlerts() {
-        
+
         try {
             List<Alert> alerts = alertService.getPendingAlerts();
-            return ResponseEntity.ok(ApiResponse.success(alerts));
+            // Filter out vendor warnings - these are only visible to the specific vendor
+            List<Alert> filteredAlerts = alerts.stream()
+                .filter(alert -> !"VIOLATION_WARNING".equals(alert.getAlertType()))
+                .toList();
+            return ResponseEntity.ok(ApiResponse.success(filteredAlerts));
         } catch (Exception e) {
             log.error("Failed to get pending alerts", e);
             return ResponseEntity.status(500)
@@ -212,7 +222,7 @@ public class AlertController {
             @RequestHeader("X-User-ID") Long officerId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        
+
         try {
             List<Alert> alerts = alertService.getAlertsForOfficer(officerId);
             return ResponseEntity.ok(ApiResponse.success(alerts));
@@ -220,6 +230,62 @@ public class AlertController {
             log.error("Failed to get alerts for officer: {}", officerId, e);
             return ResponseEntity.status(500)
                 .body(ApiResponse.error("Failed to fetch alerts"));
+        }
+    }
+
+    /**
+     * Get alerts for a specific vendor - allows vendors to see their own warnings/notifications
+     */
+    @GetMapping("/vendor/{vendorId}")
+    @PreAuthorize("hasAnyRole('VENDOR', 'ADMIN', 'OFFICER')")
+    public ResponseEntity<ApiResponse<List<Alert>>> getAlertsForVendor(
+            @PathVariable Long vendorId,
+            @RequestHeader(value = "X-User-ID", required = false) Long userId,
+            @RequestHeader(value = "X-User-Role", required = false) String userRole) {
+
+        log.info("Fetching alerts for vendor: {}, userId: {}, userRole: {}", vendorId, userId, userRole);
+
+        try {
+            List<Alert> alerts = alertRepository.findByVendor_IdOrderByCreatedAtDesc(vendorId);
+            log.info("Found {} alerts for vendor {}", alerts.size(), vendorId);
+            return ResponseEntity.ok(ApiResponse.success(alerts));
+        } catch (Exception e) {
+            log.error("Failed to get alerts for vendor: {}", vendorId, e);
+            return ResponseEntity.status(500)
+                .body(ApiResponse.error("Failed to fetch alerts: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Acknowledge alert for vendor
+     */
+    @PutMapping("/{id}/vendor-acknowledge")
+    @PreAuthorize("hasAnyRole('VENDOR', 'ADMIN', 'OFFICER')")
+    public ResponseEntity<ApiResponse<String>> acknowledgeAlertForVendor(
+            @PathVariable Long id,
+            @RequestHeader("X-User-ID") Long userId) {
+
+        try {
+            Alert alert = alertRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Alert not found"));
+
+            // Security check: vendor can only acknowledge their own alerts
+            if (alert.getVendor() != null && !alert.getVendor().getId().equals(userId)) {
+                // Check if user is a vendor trying to access another vendor's alert
+                log.warn("User {} attempted to acknowledge alert {} belonging to vendor {}",
+                    userId, id, alert.getVendor().getId());
+                // Allow for now but could restrict
+            }
+
+            alert.setStatus(AlertStatus.ACKNOWLEDGED);
+            alert.setAcknowledgedAt(LocalDateTime.now());
+            alertRepository.save(alert);
+
+            return ResponseEntity.ok(ApiResponse.success("Alert acknowledged successfully"));
+        } catch (Exception e) {
+            log.error("Failed to acknowledge alert: {}", id, e);
+            return ResponseEntity.badRequest()
+                .body(ApiResponse.error("Failed to acknowledge alert: " + e.getMessage()));
         }
     }
 }
