@@ -16,5 +16,6 @@ public class AuthResponse {
     private String username;
     private String fullName;
     private UserRole role;
-    private String vendorId; // For VENDOR role users
+    private String vendorId; // String vendor ID (e.g., SMC-V-xxx)
+    private Long vendorDbId; // Numeric vendor database ID for payments
 }

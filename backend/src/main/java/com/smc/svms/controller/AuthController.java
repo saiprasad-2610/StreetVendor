@@ -51,11 +51,12 @@ public class AuthController {
                     .fullName(user.getFullName())
                     .role(user.getRole());
 
-            // Add vendorId for VENDOR role users
+            // Add vendorId and vendorDbId for VENDOR role users
             if (user.getRole() == UserRole.VENDOR) {
                 Vendor vendor = vendorRepository.findByCreatedBy(user).orElse(null);
                 if (vendor != null) {
                     responseBuilder.vendorId(vendor.getVendorId());
+                    responseBuilder.vendorDbId(vendor.getId()); // Numeric ID for payments
                 }
             }
 

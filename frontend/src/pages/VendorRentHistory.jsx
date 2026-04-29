@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
-import { CreditCard, Calendar, IndianRupee, Filter, CheckCircle, AlertCircle, FileText, Download, CreditCard as PayIcon } from 'lucide-react';
+import { CreditCard, Calendar, IndianRupee, Filter, CheckCircle, AlertCircle, FileText, Download, CreditCard as PayIcon, Loader } from 'lucide-react';
 import { format } from 'date-fns';
 
 const VendorRentHistory = () => {
@@ -13,6 +13,7 @@ const VendorRentHistory = () => {
   const [loading, setLoading] = useState(true);
   const [filterMonth, setFilterMonth] = useState('');
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [processingPayment, setProcessingPayment] = useState(false);
   const [stats, setStats] = useState({
     totalPaid: 0,
     totalPending: 0,
@@ -140,6 +141,105 @@ Transaction ID: ${payment.razorpayPaymentId || 'N/A'}
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  // Load Razorpay checkout script
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  // Handle rent payment
+  const handlePayNow = async (payment) => {
+    if (processingPayment) return;
+
+    setProcessingPayment(true);
+    try {
+      // Get vendor database ID (Long) from auth context or fetch from profile
+      let vendorDbId = user?.vendorDbId; // This is the numeric vendor ID for payments
+      if (!vendorDbId) {
+        const profileRes = await axios.get('/api/vendors/me');
+        vendorDbId = profileRes.data?.id; // Use numeric ID from vendor profile
+      }
+
+      if (!vendorDbId) {
+        alert('Vendor ID not found. Please logout and login again.');
+        return;
+      }
+
+      // Load Razorpay script
+      const isLoaded = await loadRazorpayScript();
+      if (!isLoaded) {
+        alert('Failed to load payment gateway. Please try again.');
+        return;
+      }
+
+      // Create order on backend
+      const orderRes = await axios.post(`/api/payments/create-rent-order/${vendorDbId}`);
+      const { orderId, amount, currency, keyId } = orderRes.data;
+
+      // Open Razorpay checkout
+      const options = {
+        key: keyId,
+        amount: amount,
+        currency: currency,
+        name: 'SMC Street Vendor Management',
+        description: `Rent Payment - ${payment.monthName || months.find(m => m.value === payment.month)?.label} ${payment.year}`,
+        order_id: orderId,
+        handler: async (response) => {
+          try {
+            // Verify payment on backend
+            const verifyRes = await axios.post('/api/payments/verify', {
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+              vendorId: vendorDbId,
+              isRent: true
+            });
+
+            if (verifyRes.data) {
+              alert('Payment successful!');
+              // Refresh payment history
+              fetchRentHistory();
+            } else {
+              alert('Payment verification failed. Please contact support.');
+            }
+          } catch (err) {
+            console.error('Payment verification failed:', err);
+            alert('Payment verification failed. Please contact support.');
+          }
+        },
+        prefill: {
+          name: user?.name || '',
+          email: user?.email || ''
+        },
+        theme: {
+          color: '#3B82F6'
+        },
+        modal: {
+          ondismiss: () => {
+            setProcessingPayment(false);
+          }
+        }
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
+    } catch (err) {
+      console.error('Payment initiation failed:', err);
+      alert(`Payment failed: ${err.response?.data?.message || err.message}`);
+    } finally {
+      setProcessingPayment(false);
+    }
   };
 
   return (
@@ -308,11 +408,21 @@ Transaction ID: ${payment.razorpayPaymentId || 'N/A'}
                       )}
                       {!payment.isPaid && (
                         <button
-                          onClick={() => alert('Payment feature coming soon')}
-                          className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-700 transition flex items-center gap-1"
+                          onClick={() => handlePayNow(payment)}
+                          disabled={processingPayment}
+                          className="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-700 transition flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <IndianRupee size={12} />
-                          Pay Now
+                          {processingPayment ? (
+                            <>
+                              <Loader size={12} className="animate-spin" />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <IndianRupee size={12} />
+                              Pay Now
+                            </>
+                          )}
                         </button>
                       )}
                     </td>

@@ -516,29 +516,68 @@ const ZoneManagement = () => {
   }, [newZone.rentPerSqFt, newZone.radiusFeet, newZone.rectLengthFeet, newZone.rectBreadthFeet, polygonPoints, drawingMode]);
 
   const getCurrentLocation = () => {
+    console.log('Getting current location...');
+    console.log('Navigator available:', !!navigator);
+    console.log('Geolocation available:', !!(navigator && navigator.geolocation));
+    
     if (!navigator.geolocation) {
+      console.error('Geolocation API not available');
       alert('Geolocation is not supported by your browser');
       return;
     }
+    
+    // Check if we're on HTTPS (required for geolocation in most browsers)
+    const isSecureContext = window.isSecureContext;
+    console.log('Secure context (HTTPS):', isSecureContext);
+    if (!isSecureContext) {
+      console.warn('Not in secure context - geolocation may fail in some browsers');
+    }
+    
     setLocationLoading(true);
+    
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const { latitude, longitude } = position.coords;
+        const { latitude, longitude, accuracy } = position.coords;
+        console.log('Location obtained:', { lat: latitude, lng: longitude, accuracy });
+        
         setUserLocation({ lat: latitude, lng: longitude });
         setMapCenter({ lat: latitude, lng: longitude });
         setMapZoom(18);
+        
         if (mapRef.current) {
           mapRef.current.panTo({ lat: latitude, lng: longitude });
           mapRef.current.setZoom(18);
+          console.log('Map panned to location');
+        } else {
+          console.warn('Map ref not available');
         }
+        
         setLocationLoading(false);
       },
       (error) => {
-        console.error('Error getting location:', error);
-        alert('Unable to retrieve your location. Please enable location services.');
+        console.error('Geolocation error:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        
+        let errorMsg = 'Unable to retrieve your location. ';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMsg += 'Please allow location access in your browser settings.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMsg += 'Location information is unavailable.';
+            break;
+          case error.TIMEOUT:
+            errorMsg += 'Location request timed out. Please try again.';
+            break;
+          default:
+            errorMsg += error.message || 'Unknown error occurred.';
+        }
+        
+        alert(errorMsg);
         setLocationLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
